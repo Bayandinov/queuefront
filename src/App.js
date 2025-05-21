@@ -9,30 +9,30 @@ import DashboardPage from './DashboardPage';
 import './App.css';
 import AdminPanelPage from './AdminPanelPage';
 
-const App = () => {
-  //return <GuestServicePage />;
-  //return <EmployeeLoginPage />;
-//return <LoginClient />;
-  // return <DatePickerPage />;
-  //return <VerificationCodePage/>;
-  return <DashboardPage/>;
- // return <AdminPanelPage/>;
-};
+// const App = () => {
+//   //return <GuestServicePage />;
+//   //return <EmployeeLoginPage />;
+// //return <LoginClient />;
+//    //return <DatePickerPage />;
+//   //return <VerificationCodePage/>;
+//   //return <DashboardPage/>;
+//  // return <AdminPanelPage/>;
+// };
 
-// function App() {
-//   return (
-//     <Router>
-//       <Routes>
-//       <Route path="/" element={<LoginClient />} />
-//       <Route path="/employee-login" element={<EmployeeLoginPage />} />
-//       <Route path="/date-picker" element={<DatePickerPage />} />
-//       <Route path="/verify-code" element={<VerificationCodePage />} />
-//       <Route path="/guest-service" element={<GuestServicePage />} />
-//       <Route path="/admin-panel" element={<AdminPanelPage />} />
-//       <Route path="/dashboard" element={<DashboardPage />} />
-//       </Routes>
-//     </Router>
-//   );
-// }
+function App() {
+  return (
+    <Router>
+      <Routes>
+      <Route path="/" element={<LoginClient />} />
+      <Route path="/employee-login" element={<EmployeeLoginPage />} />
+      <Route path="/date-picker" element={<DatePickerPage />} />
+      <Route path="/verify-code" element={<VerificationCodePage />} />
+      <Route path="/guest-service" element={<GuestServicePage />} />
+      <Route path="/admin-panel" element={<AdminPanelPage />} />
+      <Route path="/dashboard" element={<DashboardPage />} />
+      </Routes>
+    </Router>
+  );
+}
 
 export default App;
