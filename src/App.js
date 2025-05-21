@@ -1,25 +1,38 @@
-import logo from './logo.svg';
+import React from 'react';
+import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
+import LoginClient from './LoginClient';
+import DatePickerPage from './DatePickerPage';
+import EmployeeLoginPage from './EmployeeLoginPage';
+import GuestServicePage from './GuestServicePage';
+import VerificationCodePage from './VerificationCodePage';
+import DashboardPage from './DashboardPage';
 import './App.css';
+import AdminPanelPage from './AdminPanelPage';
 
-function App() {
-  return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
-  );
-}
+const App = () => {
+  //return <GuestServicePage />;
+  //return <EmployeeLoginPage />;
+//return <LoginClient />;
+  // return <DatePickerPage />;
+  //return <VerificationCodePage/>;
+  return <DashboardPage/>;
+ // return <AdminPanelPage/>;
+};
+
+// function App() {
+//   return (
+//     <Router>
+//       <Routes>
+//       <Route path="/" element={<LoginClient />} />
+//       <Route path="/employee-login" element={<EmployeeLoginPage />} />
+//       <Route path="/date-picker" element={<DatePickerPage />} />
+//       <Route path="/verify-code" element={<VerificationCodePage />} />
+//       <Route path="/guest-service" element={<GuestServicePage />} />
+//       <Route path="/admin-panel" element={<AdminPanelPage />} />
+//       <Route path="/dashboard" element={<DashboardPage />} />
+//       </Routes>
+//     </Router>
+//   );
+// }
 
 export default App;
