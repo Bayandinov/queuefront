@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useDispatch } from 'react-redux';
 import axios from 'axios';
+import { saveClientData } from './store/clientSlice'; // Adjust the path as needed
 
 const VerificationCodePage = () => {
   const [code, setCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const dispatch = useDispatch();
 
   const handleCodeChange = (e) => {
     setCode(e.target.value);
@@ -18,7 +21,7 @@ const VerificationCodePage = () => {
       return;
     }
 
-    const email = location.state?.email;
+    const { email, firstName, lastName, middleName } = location.state || {};
     if (!email) {
       alert('Ошибка: Email не передан. Вернитесь на страницу входа.');
       navigate('/');
@@ -32,7 +35,17 @@ const VerificationCodePage = () => {
         code,
       });
 
-      const { firstName, lastName } = response.data;
+      const { id } = response.data; // Assuming the backend returns the client ID
+      const client = {
+        email,
+        firstName,
+        lastName,
+        middleName: middleName || '',
+        id: id || 0,
+      };
+
+      // Save client data to Redux store
+      dispatch(saveClientData(client));
       alert(`Добро пожаловать, ${firstName} ${lastName}! Вы успешно подтвердили код.`);
       navigate('/date-picker');
     } catch (error) {

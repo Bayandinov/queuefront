@@ -1,24 +1,39 @@
 import React, { useState, useEffect } from 'react';
+import { useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
+import { registerLocale } from 'react-datepicker';
+import ru from 'date-fns/locale/ru';
 
-// Компонент для страницы выбора слота и типа
+// Регистрация русской локализации
+registerLocale('ru', ru);
+
 const DatePickerPage = () => {
-  // Состояния для данных, выбранного типа, слота, даты и уведомления
   const [targets, setTargets] = useState([]);
   const [slots, setSlots] = useState([]);
   const [selectedTarget, setSelectedTarget] = useState(null);
   const [selectedSlot, setSelectedSlot] = useState(null);
-  const [selectedDate, setSelectedDate] = useState('');
+  const [selectedDate, setSelectedDate] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
+  const navigate = useNavigate();
 
-  // Загрузка типов из API при монтировании компонента
+  // Извлекаем client из Redux слайса
+  const client = useSelector((state) => state.client.client);
+
+  // Загрузка типов из API
   useEffect(() => {
     const fetchTargets = async () => {
       try {
         setLoading(true);
-        const response = await axios.get('http://localhost:8081/api/v1/client/targets');
+        const response = await axios.get('http://localhost:8081/api/v1/client/targets', {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
         if (!response.headers['content-type']?.includes('application/json')) {
           throw new Error('Ответ сервера не является JSON');
         }
@@ -40,8 +55,12 @@ const DatePickerPage = () => {
     const fetchSlots = async () => {
       try {
         setLoading(true);
+        const formattedDate = selectedDate.toISOString().split('T')[0];
         const response = await axios.get('http://localhost:8081/api/v1/client/slots', {
-          params: { date: selectedDate },
+          params: { date: formattedDate },
+          headers: {
+            'Content-Type': 'application/json',
+          },
         });
         if (!response.headers['content-type']?.includes('application/json')) {
           throw new Error('Ответ сервера не является JSON');
@@ -59,57 +78,82 @@ const DatePickerPage = () => {
   }, [selectedDate]);
 
   // Обработчик выбора даты
-  const handleDateChange = (event) => {
-    setSelectedDate(event.target.value);
-    setSelectedSlot(null); // Сброс выбранного слота при смене даты
-    setSuccessMessage(null); // Сброс уведомления
+  const handleDateChange = (date) => {
+    setSelectedDate(date);
+    setSelectedSlot(null);
+    setSuccessMessage(null);
   };
 
   // Обработчик выбора типа
   const handleTargetSelect = (target) => {
     setSelectedTarget(target);
-    setSelectedSlot(null); // Сброс выбранного слота при смене типа
-    setSuccessMessage(null); // Сброс уведомления
+    setSelectedSlot(null);
+    setSuccessMessage(null);
   };
 
   // Обработчик выбора слота
   const handleSlotSelect = (slot) => {
     if (slot.isAvailable) {
       setSelectedSlot(slot);
-      setSuccessMessage(null); // Сброс уведомления
+      setSuccessMessage(null);
     }
   };
 
-  // Форматирование времени слота
+  // Форматирование времени слота для отображения
   const formatSlotTime = (slotTime) => {
-    return slotTime.split(':').slice(0, 2).join(':'); // Убираем секунды
+    if (typeof slotTime === 'string') {
+      return slotTime.split(':').slice(0, 2).join(':');
+    } else if (typeof slotTime === 'object' && slotTime.hour !== undefined) {
+      return `${slotTime.hour.toString().padStart(2, '0')}:${slotTime.minute.toString().padStart(2, '0')}`;
+    }
+    console.warn('Некорректный формат slotTime:', slotTime);
+    return 'Неверное время';
   };
 
-  // Форматирование даты
+  // Форматирование даты для отображения
   const formatSlotDate = (slotDate) => {
     const date = new Date(slotDate);
     return date.toLocaleDateString('ru-RU', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   };
 
-  // Преобразование slotTime в объект для POST-запроса
-  const convertSlotTimeToObject = (slotTime) => {
-    const [hour, minute] = slotTime.split(':').map(Number);
-    return {
-      hour,
-      minute,
-      second: 0,
-      nano: 0,
-    };
+  // Преобразование slotTime в строку HH:mm:ss для POST-запроса
+  const convertSlotTimeToString = (slotTime) => {
+    if (typeof slotTime === 'string') {
+      const [hour, minute] = slotTime.split(':').map(Number);
+      return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:00`;
+    } else if (typeof slotTime === 'object' && slotTime.hour !== undefined) {
+      return `${slotTime.hour.toString().padStart(2, '0')}:${slotTime.minute.toString().padStart(2, '0')}:00`;
+    }
+    console.error('Некорректный формат slotTime:', slotTime);
+    throw new Error('Некорректный формат slotTime');
+  };
+
+  // Форматирование slotDate в строку YYYY-MM-DD
+  const formatSlotDateForApi = (slotDate) => {
+    if (typeof slotDate === 'string') {
+      const date = new Date(slotDate);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split('T')[0];
+      }
+      return slotDate;
+    }
+    if (slotDate instanceof Date) {
+      return slotDate.toISOString().split('T')[0];
+    }
+    console.warn('Некорректный формат slotDate:', slotDate);
+    return slotDate;
   };
 
   // Группировка слотов по времени дня
   const groupSlotsByTime = (slots) => {
-    const morning = []; // до 12:00
-    const afternoon = []; // 12:00 - 16:00
-    const evening = []; // после 16:00
+    const morning = [];
+    const afternoon = [];
+    const evening = [];
 
     slots.forEach((slot) => {
-      const hour = parseInt(slot.slotTime.split(':')[0], 10);
+      const hour = typeof slot.slotTime === 'string' 
+        ? parseInt(slot.slotTime.split(':')[0], 10) 
+        : slot.slotTime.hour;
       if (hour < 12) {
         morning.push(slot);
       } else if (hour < 16) {
@@ -131,35 +175,68 @@ const DatePickerPage = () => {
       return;
     }
 
+    if (!client || !client.id || client.id === 0) {
+      console.error('Ошибка: client.id не определён или равен 0', client);
+      alert('Ошибка: клиент не авторизован. Пожалуйста, войдите в систему.');
+      navigate('/');
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
       setSuccessMessage(null);
 
-      // Формирование тела POST-запроса
       const requestBody = {
-        clientId: 0, // Фиктивное значение, замените на реальное, если доступно
+        clientId: client.id,
         targetId: selectedTarget.id,
-        slotDate: selectedSlot.slotDate,
-        slotTime: convertSlotTimeToObject(selectedSlot.slotTime),
+        slotDate: formatSlotDateForApi(selectedSlot.slotDate),
+        slotTime: convertSlotTimeToString(selectedSlot.slotTime),
       };
 
-      // Отправка POST-запроса
-      await axios.post('http://localhost:8081/api/v1/queue/select', requestBody);
+      console.log('Request Body:', JSON.stringify(requestBody, null, 2));
+      console.log('client:', client);
+      console.log('selectedTarget:', selectedTarget);
+      console.log('selectedSlot:', selectedSlot);
+      console.log('selectedDate:', selectedDate);
 
-      // Повторный запрос слотов для обновления
-      const response = await axios.get('http://localhost:8081/api/v1/client/slots', {
-        params: { date: selectedDate },
+      const response = await axios.post('http://localhost:8081/api/v1/queue/select', requestBody, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
       });
-      if (!response.headers['content-type']?.includes('application/json')) {
+
+      console.log('Response:', response.data);
+
+      const slotsResponse = await axios.get('http://localhost:8081/api/v1/client/slots', {
+        params: { date: selectedDate.toISOString().split('T')[0] },
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!slotsResponse.headers['content-type']?.includes('application/json')) {
         throw new Error('Ответ сервера не является JSON');
       }
-      setSlots(response.data);
-      setSelectedSlot(null); // Сброс выбранного слота
+      setSlots(slotsResponse.data);
+      setSelectedSlot(null);
       setSuccessMessage('Запись успешно подтверждена!');
     } catch (err) {
       console.error('Ошибка при подтверждении записи:', err);
-      setError(`Не удалось подтвердить запись: ${err.response ? `${err.response.status} ${err.response.statusText}` : err.message}`);
+      console.log('Error Response:', err.response?.data);
+      let errorMessage = 'Не удалось подтвердить запись';
+      if (err.response) {
+        if (err.response.status === 403) {
+          errorMessage = 'Доступ запрещён: проверьте ID клиента или доступ к слоту';
+        } else if (err.response.status === 400) {
+          errorMessage = `Некорректный запрос: ${err.response.data || 'проверьте данные'}`;
+        } else {
+          errorMessage = `${err.response.status} ${err.response.statusText}: ${err.response.data || ''}`;
+        }
+      } else {
+        errorMessage = err.message;
+      }
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -178,19 +255,16 @@ const DatePickerPage = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-blue-50 via-gray-50 to-gray-100 flex flex-col items-center p-4 sm:p-8">
-      {/* Заголовок */}
       <h1 className="text-4xl sm:text-5xl font-extrabold mb-10 text-gray-900 drop-shadow-lg animate-fade-in">
         Запись на прием
       </h1>
 
-      {/* Уведомление об успехе */}
       {successMessage && (
         <div className="w-full max-w-lg mb-8 p-6 bg-green-100 text-green-800 rounded-2xl shadow-xl animate-fade-in">
           <h3 className="text-xl font-semibold">{successMessage}</h3>
         </div>
       )}
 
-      {/* Индикатор прогресса */}
       <div className="w-full max-w-lg mb-8 flex justify-between">
         <div className={`flex-1 text-center ${selectedDate ? 'text-blue-600' : 'text-gray-400'}`}>
           <span className="font-semibold">1. Дата</span>
@@ -206,19 +280,25 @@ const DatePickerPage = () => {
         </div>
       </div>
 
-      {/* Выбор даты */}
       <div className="w-full max-w-lg mb-10 animate-fade-in">
         <h2 className="text-2xl font-semibold mb-4 text-gray-700">Выберите дату</h2>
         <div className="relative">
-          <input
-            type="date"
-            value={selectedDate}
+          <DatePicker
+            selected={selectedDate}
             onChange={handleDateChange}
             className="w-full p-4 rounded-2xl bg-white text-gray-800 border border-gray-200 focus:outline-none focus:ring-4 focus:ring-blue-400 shadow-xl transition duration-300"
-            min={new Date().toISOString().split('T')[0]}
+            minDate={new Date()}
+            dateFormat="dd.MM.yyyy"
+            placeholderText="Выберите дату"
+            showPopperArrow={false}
+            popperClassName="custom-datepicker-popper"
+            locale="ru"
+            showMonthDropdown
+            showYearDropdown
+            dropdownMode="select"
           />
           <svg
-            className="absolute right-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-500"
+            className="absolute right-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-500 pointer-events-none"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -229,7 +309,6 @@ const DatePickerPage = () => {
         </div>
       </div>
 
-      {/* Выбор типа */}
       <div className="w-full max-w-lg mb-10 animate-fade-in">
         <h2 className="text-2xl font-semibold mb-4 text-gray-700">Выберите услугу</h2>
         {loading && !selectedDate && (
@@ -263,8 +342,7 @@ const DatePickerPage = () => {
         </div>
       </div>
 
-      {/* Выбор слота */}
-      intravenously{selectedDate && selectedTarget && (
+      {selectedDate && selectedTarget && (
         <div className="w-full max-w-lg mb-10 animate-fade-in">
           <h2 className="text-2xl font-semibold mb-4 text-gray-700">Выберите время</h2>
           {loading && <div className="text-center text-gray-600 animate-pulse">Загрузка времени...</div>}
@@ -275,7 +353,6 @@ const DatePickerPage = () => {
           )}
           {!loading && slots.length > 0 && (
             <div className="space-y-8">
-              {/* Утренние слоты */}
               {morning.length > 0 && (
                 <div>
                   <h3 className="text-lg font-medium text-gray-600 mb-3 border-b border-gray-200 pb-2">Утро (до 12:00)</h3>
@@ -318,7 +395,6 @@ const DatePickerPage = () => {
                   </div>
                 </div>
               )}
-              {/* Дневные слоты */}
               {afternoon.length > 0 && (
                 <div>
                   <h3 className="text-lg font-medium text-gray-600 mb-3 border-b border-gray-200 pb-2">День (12:00–16:00)</h3>
@@ -361,7 +437,6 @@ const DatePickerPage = () => {
                   </div>
                 </div>
               )}
-              {/* Вечерние слоты */}
               {evening.length > 0 && (
                 <div>
                   <h3 className="text-lg font-medium text-gray-600 mb-3 border-b border-gray-200 pb-2">Вечер (после 16:00)</h3>
@@ -409,7 +484,6 @@ const DatePickerPage = () => {
         </div>
       )}
 
-      {/* Предварительный просмотр */}
       {selectedTarget && selectedSlot && selectedDate && (
         <div className="w-full max-w-lg mb-10 p-6 bg-white rounded-2xl shadow-xl animate-fade-in">
           <h3 className="text-xl font-semibold mb-4 text-gray-700">Ваш выбор</h3>
@@ -425,7 +499,6 @@ const DatePickerPage = () => {
         </div>
       )}
 
-      {/* Кнопка подтверждения */}
       <div className="relative group">
         <button
           className={`px-8 py-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl shadow-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-300 transform hover:scale-105 ${
@@ -446,7 +519,7 @@ const DatePickerPage = () => {
   );
 };
 
-// Анимация появления
+// Кастомные стили
 const style = document.createElement('style');
 style.textContent = `
   @keyframes fadeIn {
@@ -455,6 +528,32 @@ style.textContent = `
   }
   .animate-fade-in {
     animation: fadeIn 0.5s ease-out;
+  }
+  .custom-datepicker-popper {
+    z-index: 50;
+    width: fit-content;
+    margin-top: 8px;
+  }
+  .react-datepicker {
+    border: 1px solid #e2e8f0;
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    font-family: inherit;
+  }
+  .react-datepicker__triangle {
+    display: none;
+  }
+  .react-datepicker__header {
+    background-color: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .react-datepicker__day {
+    border-radius: 0.3rem;
+  }
+  .react-datepicker__day--selected,
+  .react-datepicker__day--keyboard-selected {
+    background-color: #2563eb;
+    color: white;
   }
 `;
 document.head.appendChild(style);

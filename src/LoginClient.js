@@ -16,17 +16,31 @@ const LoginClient = () => {
       return;
     }
 
+    // Валидация email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      alert('Введите корректный email');
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const response = await axios.post('http://localhost:8081/api/v1/mail/generate', {
+      await axios.post('http://localhost:8081/api/v1/mail/generate', {
         email,
         firstName,
         lastName,
         middleName,
       });
 
-      // Передаём email через состояние маршрутизации
-      navigate('/verify-code', { state: { email } });
+      // Pass client data to the verification page via navigate state
+      navigate('/verify-code', { 
+        state: { 
+          email,
+          firstName,
+          lastName,
+          middleName
+        } 
+      });
     } catch (error) {
       console.error('Ошибка при отправке кода:', error.response ? error.response.data : error.message);
       alert('Не удалось отправить код. Проверьте введённые данные.');
@@ -39,7 +53,6 @@ const LoginClient = () => {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-teal-100 to-teal-300">
       <div className="bg-white p-8 rounded-2xl shadow-lg w-full max-w-sm">
         <h2 className="text-2xl font-bold text-center text-teal-600 mb-6">Вход</h2>
-        {/* Фамилия */}
         <div className="mb-4">
           <label className="block text-gray-700 text-sm font-semibold mb-2">Фамилия</label>
           <input
@@ -51,7 +64,6 @@ const LoginClient = () => {
             disabled={isLoading}
           />
         </div>
-        {/* Имя */}
         <div className="mb-4">
           <label className="block text-gray-700 text-sm font-semibold mb-2">Имя</label>
           <input
@@ -63,7 +75,6 @@ const LoginClient = () => {
             disabled={isLoading}
           />
         </div>
-        {/* Отчество */}
         <div className="mb-4">
           <label className="block text-gray-700 text-sm font-semibold mb-2">Отчество</label>
           <input
@@ -75,7 +86,6 @@ const LoginClient = () => {
             disabled={isLoading}
           />
         </div>
-        {/* Email */}
         <div className="mb-6">
           <label className="block text-gray-700 text-sm font-semibold mb-2">Почта</label>
           <input
