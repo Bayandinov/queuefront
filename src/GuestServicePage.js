@@ -590,14 +590,6 @@ const GuestServicePage = () => {
               Стол: <span className="font-semibold">{selectedTable?.number || '-'}</span>
             </p>
             <p className="text-gray-600">
-              Время ожидания:{' '}
-              <span className="font-semibold">
-                {queueData.find((item) => item.id === currentQueueId)?.createdAt
-                  ? formatTime(queueData.find((item) => item.id === currentQueueId)?.createdAt)
-                  : '00:00:00'}
-              </span>
-            </p>
-            <p className="text-gray-600">
               Время вызова:{' '}
               <span className="font-semibold">
                 {queueData.find((item) => item.id === currentQueueId)?.calledAt
@@ -698,33 +690,6 @@ const GuestServicePage = () => {
                 {queueData.filter((item) => item.status === 'ARRIVED' || item.status === 'SERVED').length} /{' '}
                 {queueData.filter((item) => item.status === 'NO_SHOW').length}
               </p>
-            </div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-lg flex items-center space-x-4">
-            <div className="p-2 bg-blue-100 rounded-full">
-              <HiChartBar className="w-6 h-6 text-blue-600" />
-            </div>
-            <div>
-              <p className="text-gray-600">Среднее время ожидания</p>
-              <p className="text-2xl font-bold text-gray-800">{formatDuration(report.averageWaitingTimeSeconds)}</p>
-            </div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-lg flex items-center space-x-4">
-            <div className="p-2 bg-yellow-100 rounded-full">
-              <HiChartBar className="w-6 h-6 text-yellow-600" />
-            </div>
-            <div>
-              <p className="text-gray-600">Максимальное время ожидания</p>
-              <p className="text-2xl font-bold text-gray-800">{formatDuration(report.maxWaitingTimeSeconds)}</p>
-            </div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-lg flex items-center space-x-4">
-            <div className="p-2 bg-red-100 rounded-full">
-              <HiChartBar className="w-6 h-6 text-red-600" />
-            </div>
-            <div>
-              <p className="text-gray-600">Минимальное время ожидания</p>
-              <p className="text-2xl font-bold text-gray-800">{formatDuration(report.minWaitingTimeSeconds)}</p>
             </div>
           </div>
         </div>
