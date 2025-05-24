@@ -21,7 +21,7 @@ const VerificationCodePage = () => {
       return;
     }
 
-    const { email, firstName, lastName, middleName } = location.state || {};
+    const { email } = location.state || {};
     if (!email) {
       alert('Ошибка: Email не передан. Вернитесь на страницу входа.');
       navigate('/');
@@ -38,15 +38,12 @@ const VerificationCodePage = () => {
       const { id } = response.data; // Assuming the backend returns the client ID
       const client = {
         email,
-        firstName,
-        lastName,
-        middleName: middleName || '',
         id: id || 0,
       };
 
       // Save client data to Redux store
       dispatch(saveClientData(client));
-      alert(`Добро пожаловать, ${firstName} ${lastName}! Вы успешно подтвердили код.`);
+      alert('Добро пожаловать! Вы успешно подтвердили код.');
       navigate('/date-picker');
     } catch (error) {
       console.error('Ошибка при проверке кода:', error.response ? error.response.data : error.message);

@@ -74,7 +74,7 @@ const EmployeeLoginPage = () => {
         err.response?.status === 401
           ? 'Неверный логин или пароль'
           : err.response?.data?.message ||
-            (err.code === 'ERR_NETWORK' ? 'Сервер недоступен. Проверьте подключение.' : 'Произошла ошибка при входе');
+          (err.code === 'ERR_NETWORK' ? 'Сервер недоступен. Проверьте подключение.' : 'Произошла ошибка при входе');
       setError(message);
     } finally {
       setIsLoading(false);
@@ -130,16 +130,21 @@ const EmployeeLoginPage = () => {
               disabled={isLoading}
             />
           </div>
-          <Link to="/" className="text-teal-600 hover:text-teal-800 text-sm underline mt-2 inline-block">
-            Клиент
-          </Link>
+
+          <div className="flex flex-col space-y-2">
+            <Link to="/" className="text-teal-600 hover:text-teal-800 text-sm underline inline-block">
+              Клиент
+            </Link>
+            <Link to="/dashboard" className="text-teal-600 hover:text-teal-800 text-sm underline inline-block">
+              Табло очереди
+            </Link>
+          </div>
         </div>
         <button
           onClick={handleLogin}
           disabled={isLoading}
-          className={`w-full py-2 bg-gradient-to-r from-teal-500 to-teal-700 text-white font-semibold rounded-lg transition-all duration-300 ${
-            isLoading ? 'opacity-50 cursor-not-allowed' : 'hover:from-teal-600 hover:to-teal-800'
-          }`}
+          className={`w-full py-2 bg-gradient-to-r from-teal-500 to-teal-700 text-white font-semibold rounded-lg transition-all duration-300 ${isLoading ? 'opacity-50 cursor-not-allowed' : 'hover:from-teal-600 hover:to-teal-800'
+            }`}
         >
           {isLoading ? (
             <span className="flex items-center justify-center">

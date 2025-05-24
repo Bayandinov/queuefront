@@ -74,6 +74,7 @@ function App() {
         <Route path="/employee-login" element={<EmployeeLoginPage />} />
         <Route path="/date-picker" element={<DatePickerPage />} />
         <Route path="/verify-code" element={<VerificationCodePage />} />
+        <Route path="/dashboard" element={<QueueBoard />} />
         <Route
           path="/guest-service"
           element={
@@ -87,14 +88,6 @@ function App() {
           element={
             <ProtectedRoute>
               <AdminPanelPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute>
-              <QueueBoard />
             </ProtectedRoute>
           }
         />

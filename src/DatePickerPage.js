@@ -2,9 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import DatePicker from 'react-datepicker';
+import DatePicker, { registerLocale } from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
-import { registerLocale } from 'react-datepicker';
 import ru from 'date-fns/locale/ru';
 
 // Регистрация русской локализации
@@ -15,14 +14,22 @@ const DatePickerPage = () => {
   const [slots, setSlots] = useState([]);
   const [selectedTarget, setSelectedTarget] = useState(null);
   const [selectedSlot, setSelectedSlot] = useState(null);
-  const [selectedDate, setSelectedDate] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(new Date()); // Начальная дата: текущая
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
+  const [queueId, setQueueId] = useState(null); // Храним queueId после записи
   const navigate = useNavigate();
 
   // Извлекаем client из Redux слайса
   const client = useSelector((state) => state.client.client);
+
+  // Текущая дата и время (локальное время пользователя)
+  const currentDateTime = new Date();
+
+  // Максимальная дата: через 1 месяц от текущей даты
+  const maxDate = new Date(currentDateTime);
+  maxDate.setMonth(maxDate.getMonth() + 1);
 
   // Загрузка типов из API
   useEffect(() => {
@@ -48,16 +55,20 @@ const DatePickerPage = () => {
     fetchTargets();
   }, []);
 
-  // Загрузка слотов при выборе даты
+  // Загрузка слотов при выборе услуги и даты
   useEffect(() => {
-    if (!selectedDate) return;
+    if (!selectedTarget || !selectedDate) return;
 
     const fetchSlots = async () => {
       try {
         setLoading(true);
+        // Форматируем дату в YYYY-MM-DD
         const formattedDate = selectedDate.toISOString().split('T')[0];
         const response = await axios.get('http://localhost:8081/api/v1/client/slots', {
-          params: { date: formattedDate },
+          params: {
+            targetId: selectedTarget.id,
+            slotDate: formattedDate,
+          },
           headers: {
             'Content-Type': 'application/json',
           },
@@ -65,7 +76,13 @@ const DatePickerPage = () => {
         if (!response.headers['content-type']?.includes('application/json')) {
           throw new Error('Ответ сервера не является JSON');
         }
-        setSlots(response.data);
+        // Проверяем, находятся ли слоты в прошлом
+        const updatedSlots = response.data.map((slot) => {
+          const slotDateTime = new Date(`${slot.slotDate}T${convertSlotTimeToString(slot.slotTime)}`);
+          const isPast = slotDateTime < currentDateTime;
+          return { ...slot, isAvailable: slot.isAvailable && !isPast };
+        });
+        setSlots(updatedSlots);
         setError(null);
       } catch (err) {
         console.error('Ошибка при загрузке слотов:', err);
@@ -75,20 +92,22 @@ const DatePickerPage = () => {
       }
     };
     fetchSlots();
-  }, [selectedDate]);
+  }, [selectedTarget, selectedDate]);
 
-  // Обработчик выбора даты
-  const handleDateChange = (date) => {
-    setSelectedDate(date);
-    setSelectedSlot(null);
-    setSuccessMessage(null);
-  };
-
-  // Обработчик выбора типа
+  // Обработчик выбора услуги
   const handleTargetSelect = (target) => {
     setSelectedTarget(target);
     setSelectedSlot(null);
     setSuccessMessage(null);
+    setQueueId(null);
+  };
+
+  // Обработчик выбора даты
+  const handleDateSelect = (date) => {
+    setSelectedDate(date);
+    setSelectedSlot(null);
+    setSuccessMessage(null);
+    setQueueId(null);
   };
 
   // Обработчик выбора слота
@@ -96,6 +115,7 @@ const DatePickerPage = () => {
     if (slot.isAvailable) {
       setSelectedSlot(slot);
       setSuccessMessage(null);
+      setQueueId(null);
     }
   };
 
@@ -116,7 +136,7 @@ const DatePickerPage = () => {
     return date.toLocaleDateString('ru-RU', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   };
 
-  // Преобразование slotTime в строку HH:mm:ss для POST-запроса
+  // Преобразование slotTime в строку HH:mm:ss для проверки времени
   const convertSlotTimeToString = (slotTime) => {
     if (typeof slotTime === 'string') {
       const [hour, minute] = slotTime.split(':').map(Number);
@@ -128,20 +148,10 @@ const DatePickerPage = () => {
     throw new Error('Некорректный формат slotTime');
   };
 
-  // Форматирование slotDate в строку YYYY-MM-DD
-  const formatSlotDateForApi = (slotDate) => {
-    if (typeof slotDate === 'string') {
-      const date = new Date(slotDate);
-      if (!isNaN(date.getTime())) {
-        return date.toISOString().split('T')[0];
-      }
-      return slotDate;
-    }
-    if (slotDate instanceof Date) {
-      return slotDate.toISOString().split('T')[0];
-    }
-    console.warn('Некорректный формат slotDate:', slotDate);
-    return slotDate;
+  // Проверка, находится ли слот в прошлом (по локальному времени)
+  const isSlotInPast = (slot) => {
+    const slotDateTime = new Date(`${slot.slotDate}T${convertSlotTimeToString(slot.slotTime)}`);
+    return slotDateTime < currentDateTime;
   };
 
   // Группировка слотов по времени дня
@@ -151,8 +161,8 @@ const DatePickerPage = () => {
     const evening = [];
 
     slots.forEach((slot) => {
-      const hour = typeof slot.slotTime === 'string' 
-        ? parseInt(slot.slotTime.split(':')[0], 10) 
+      const hour = typeof slot.slotTime === 'string'
+        ? parseInt(slot.slotTime.split(':')[0], 10)
         : slot.slotTime.hour;
       if (hour < 12) {
         morning.push(slot);
@@ -168,10 +178,10 @@ const DatePickerPage = () => {
 
   const { morning, afternoon, evening } = groupSlotsByTime(slots);
 
-  // Обработчик подтверждения выбора
+  // Обработчик подтверждения записи
   const handleSubmit = async () => {
     if (!selectedTarget || !selectedSlot || !selectedDate) {
-      alert('Пожалуйста, выберите дату, услугу и время');
+      alert('Пожалуйста, выберите услугу, дату и время');
       return;
     }
 
@@ -190,15 +200,10 @@ const DatePickerPage = () => {
       const requestBody = {
         clientId: client.id,
         targetId: selectedTarget.id,
-        slotDate: formatSlotDateForApi(selectedSlot.slotDate),
-        slotTime: convertSlotTimeToString(selectedSlot.slotTime),
+        slotId: selectedSlot.id,
       };
 
       console.log('Request Body:', JSON.stringify(requestBody, null, 2));
-      console.log('client:', client);
-      console.log('selectedTarget:', selectedTarget);
-      console.log('selectedSlot:', selectedSlot);
-      console.log('selectedDate:', selectedDate);
 
       const response = await axios.post('http://localhost:8081/api/v1/queue/select', requestBody, {
         headers: {
@@ -208,8 +213,14 @@ const DatePickerPage = () => {
 
       console.log('Response:', response.data);
 
+      // Сохраняем queueId из ответа (предполагаем, что он возвращается)
+      const newQueueId = response.data.queueId || 0; // Уточни, если структура ответа другая
+      setQueueId(newQueueId);
+
+      // Обновляем слоты после успешной записи
+      const formattedDate = selectedDate.toISOString().split('T')[0];
       const slotsResponse = await axios.get('http://localhost:8081/api/v1/client/slots', {
-        params: { date: selectedDate.toISOString().split('T')[0] },
+        params: { targetId: selectedTarget.id, slotDate: formattedDate },
         headers: {
           'Content-Type': 'application/json',
         },
@@ -218,7 +229,12 @@ const DatePickerPage = () => {
       if (!slotsResponse.headers['content-type']?.includes('application/json')) {
         throw new Error('Ответ сервера не является JSON');
       }
-      setSlots(slotsResponse.data);
+      const updatedSlots = slotsResponse.data.map((slot) => {
+        const slotDateTime = new Date(`${slot.slotDate}T${convertSlotTimeToString(slot.slotTime)}`);
+        const isPast = slotDateTime < currentDateTime;
+        return { ...slot, isAvailable: slot.isAvailable && !isPast };
+      });
+      setSlots(updatedSlots);
       setSelectedSlot(null);
       setSuccessMessage('Запись успешно подтверждена!');
     } catch (err) {
@@ -230,6 +246,53 @@ const DatePickerPage = () => {
           errorMessage = 'Доступ запрещён: проверьте ID клиента или доступ к слоту';
         } else if (err.response.status === 400) {
           errorMessage = `Некорректный запрос: ${err.response.data || 'проверьте данные'}`;
+        } else {
+          errorMessage = `${err.response.status} ${err.response.statusText}: ${err.response.data || ''}`;
+        }
+      } else {
+        errorMessage = err.message;
+      }
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Обработчик повторного вызова
+  const handleRecall = async () => {
+    if (!queueId) {
+      alert('Ошибка: ID очереди не определён. Сначала подтвердите запись.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const requestBody = {
+        queueId: queueId,
+        tableId: 0, // Фиксированное значение, уточни, если tableId динамический
+      };
+
+      console.log('Recall Request Body:', JSON.stringify(requestBody, null, 2));
+
+      const response = await axios.post('http://localhost:8081/api/v1/employee/queue/re-call', requestBody, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      console.log('Recall Response:', response.data);
+      setSuccessMessage('Клиент успешно вызван повторно!');
+    } catch (err) {
+      console.error('Ошибка при повторном вызове:', err);
+      console.log('Recall Error Response:', err.response?.data);
+      let errorMessage = 'Не удалось выполнить повторный вызов';
+      if (err.response) {
+        if (err.response.status === 403) {
+          errorMessage = 'Доступ запрещён: проверьте права сотрудника';
+        } else if (err.response.status === 400) {
+          errorMessage = `Некорректный запрос: ${err.response.data || 'проверьте queueId и tableId'}`;
         } else {
           errorMessage = `${err.response.status} ${err.response.statusText}: ${err.response.data || ''}`;
         }
@@ -262,17 +325,28 @@ const DatePickerPage = () => {
       {successMessage && (
         <div className="w-full max-w-lg mb-8 p-6 bg-green-100 text-green-800 rounded-2xl shadow-xl animate-fade-in">
           <h3 className="text-xl font-semibold">{successMessage}</h3>
+          {queueId && (
+            <button
+              className={`mt-4 px-6 py-2 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-xl shadow-md hover:from-teal-600 hover:to-teal-700 transition-all duration-300 transform hover:scale-105 ${
+                loading ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+              onClick={handleRecall}
+              disabled={loading}
+            >
+              Повторный вызов
+            </button>
+          )}
         </div>
       )}
 
       <div className="w-full max-w-lg mb-8 flex justify-between">
-        <div className={`flex-1 text-center ${selectedDate ? 'text-blue-600' : 'text-gray-400'}`}>
-          <span className="font-semibold">1. Дата</span>
-          <div className={`h-1 mt-2 ${selectedDate ? 'bg-blue-600' : 'bg-gray-200'}`}></div>
-        </div>
         <div className={`flex-1 text-center ${selectedTarget ? 'text-blue-600' : 'text-gray-400'}`}>
-          <span className="font-semibold">2. Услуга</span>
+          <span className="font-semibold">1. Услуга</span>
           <div className={`h-1 mt-2 ${selectedTarget ? 'bg-blue-600' : 'bg-gray-200'}`}></div>
+        </div>
+        <div className={`flex-1 text-center ${selectedDate ? 'text-blue-600' : 'text-gray-400'}`}>
+          <span className="font-semibold">2. Дата</span>
+          <div className={`h-1 mt-2 ${selectedDate ? 'bg-blue-600' : 'bg-gray-200'}`}></div>
         </div>
         <div className={`flex-1 text-center ${selectedSlot ? 'text-blue-600' : 'text-gray-400'}`}>
           <span className="font-semibold">3. Время</span>
@@ -281,37 +355,8 @@ const DatePickerPage = () => {
       </div>
 
       <div className="w-full max-w-lg mb-10 animate-fade-in">
-        <h2 className="text-2xl font-semibold mb-4 text-gray-700">Выберите дату</h2>
-        <div className="relative">
-          <DatePicker
-            selected={selectedDate}
-            onChange={handleDateChange}
-            className="w-full p-4 rounded-2xl bg-white text-gray-800 border border-gray-200 focus:outline-none focus:ring-4 focus:ring-blue-400 shadow-xl transition duration-300"
-            minDate={new Date()}
-            dateFormat="dd.MM.yyyy"
-            placeholderText="Выберите дату"
-            showPopperArrow={false}
-            popperClassName="custom-datepicker-popper"
-            locale="ru"
-            showMonthDropdown
-            showYearDropdown
-            dropdownMode="select"
-          />
-          <svg
-            className="absolute right-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-500 pointer-events-none"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
-        </div>
-      </div>
-
-      <div className="w-full max-w-lg mb-10 animate-fade-in">
         <h2 className="text-2xl font-semibold mb-4 text-gray-700">Выберите услугу</h2>
-        {loading && !selectedDate && (
+        {loading && !selectedTarget && (
           <div className="text-center text-gray-600 animate-pulse">Загрузка услуг...</div>
         )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -334,7 +379,11 @@ const DatePickerPage = () => {
                   viewBox="0 0 20 20"
                   xmlns="http://www.w3.org/2000/svg"
                 >
-                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  <path
+                    fillRule="evenodd"
+                    d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                    clipRule="evenodd"
+                  />
                 </svg>
               )}
             </button>
@@ -342,13 +391,30 @@ const DatePickerPage = () => {
         </div>
       </div>
 
-      {selectedDate && selectedTarget && (
+      {selectedTarget && (
+        <div className="w-full max-w-lg mb-10 animate-fade-in">
+          <h2 className="text-2xl font-semibold mb-4 text-gray-700">Выберите дату</h2>
+          <DatePicker
+            selected={selectedDate}
+            onChange={handleDateSelect}
+            minDate={currentDateTime} // Ограничение: только текущая дата и будущие
+            maxDate={maxDate} // Ограничение: не дальше одного месяца вперёд
+            dateFormat="dd.MM.yyyy"
+            locale="ru"
+            className="p-3 border border-gray-200 rounded-xl w-full bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 text-gray-800 placeholder-gray-400"
+            placeholderText="Выберите дату"
+            popperClassName="custom-datepicker-popper"
+          />
+        </div>
+      )}
+
+      {selectedTarget && selectedDate && (
         <div className="w-full max-w-lg mb-10 animate-fade-in">
           <h2 className="text-2xl font-semibold mb-4 text-gray-700">Выберите время</h2>
           {loading && <div className="text-center text-gray-600 animate-pulse">Загрузка времени...</div>}
           {!loading && slots.length === 0 && (
             <div className="text-center text-gray-600 bg-white p-4 rounded-2xl shadow-xl">
-              Нет доступных слотов
+              Нет доступных слотов на выбранную дату
             </div>
           )}
           {!loading && slots.length > 0 && (
@@ -361,33 +427,39 @@ const DatePickerPage = () => {
                       <button
                         key={slot.id}
                         className={`relative p-4 rounded-2xl shadow-xl transition-all duration-300 transform group ${
-                          slot.isAvailable
-                            ? selectedSlot?.id === slot.id
-                              ? 'bg-gradient-to-r from-green-600 to-green-700 text-white animate-pulse'
-                              : 'bg-white text-gray-800 hover:bg-green-50 hover:scale-105'
-                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          isSlotInPast(slot)
+                            ? 'bg-red-100 text-red-400 cursor-not-allowed'
+                            : slot.isAvailable
+                              ? selectedSlot?.id === slot.id
+                                ? 'bg-gradient-to-r from-green-600 to-green-700 text-white animate-pulse'
+                                : 'bg-white text-gray-800 hover:bg-green-50 hover:scale-105'
+                              : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                         }`}
                         onClick={() => handleSlotSelect(slot)}
-                        disabled={!slot.isAvailable || loading}
+                        disabled={!slot.isAvailable || isSlotInPast(slot) || loading}
                       >
                         <div className="flex items-center justify-between">
                           <div className="text-lg font-medium">{formatSlotTime(slot.slotTime)}</div>
-                          {slot.isAvailable ? (
+                          {slot.isAvailable && !isSlotInPast(slot) ? (
                             <svg
                               className="h-5 w-5 text-green-400"
                               fill="currentColor"
                               viewBox="0 0 20 20"
                               xmlns="http://www.w3.org/2000/svg"
                             >
-                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              <path
+                                fillRule="evenodd"
+                                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                clipRule="evenodd"
+                              />
                             </svg>
                           ) : (
                             <span className="text-gray-400 group-hover:tooltip">🔒</span>
                           )}
                         </div>
-                        {!slot.isAvailable && (
+                        {(!slot.isAvailable || isSlotInPast(slot)) && (
                           <span className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-                            Слот занят
+                            {isSlotInPast(slot) ? 'Слот в прошлом' : 'Слот занят'}
                           </span>
                         )}
                       </button>
@@ -403,33 +475,39 @@ const DatePickerPage = () => {
                       <button
                         key={slot.id}
                         className={`relative p-4 rounded-2xl shadow-xl transition-all duration-300 transform group ${
-                          slot.isAvailable
-                            ? selectedSlot?.id === slot.id
-                              ? 'bg-gradient-to-r from-green-600 to-green-700 text-white animate-pulse'
-                              : 'bg-white text-gray-800 hover:bg-green-50 hover:scale-105'
-                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          isSlotInPast(slot)
+                            ? 'bg-red-100 text-red-400 cursor-not-allowed'
+                            : slot.isAvailable
+                              ? selectedSlot?.id === slot.id
+                                ? 'bg-gradient-to-r from-green-600 to-green-700 text-white animate-pulse'
+                                : 'bg-white text-gray-800 hover:bg-green-50 hover:scale-105'
+                              : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                         }`}
                         onClick={() => handleSlotSelect(slot)}
-                        disabled={!slot.isAvailable || loading}
+                        disabled={!slot.isAvailable || isSlotInPast(slot) || loading}
                       >
                         <div className="flex items-center justify-between">
                           <div className="text-lg font-medium">{formatSlotTime(slot.slotTime)}</div>
-                          {slot.isAvailable ? (
+                          {slot.isAvailable && !isSlotInPast(slot) ? (
                             <svg
                               className="h-5 w-5 text-green-400"
                               fill="currentColor"
                               viewBox="0 0 20 20"
                               xmlns="http://www.w3.org/2000/svg"
                             >
-                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              <path
+                                fillRule="evenodd"
+                                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                clipRule="evenodd"
+                              />
                             </svg>
                           ) : (
                             <span className="text-gray-400 group-hover:tooltip">🔒</span>
                           )}
                         </div>
-                        {!slot.isAvailable && (
+                        {(!slot.isAvailable || isSlotInPast(slot)) && (
                           <span className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-                            Слот занят
+                            {isSlotInPast(slot) ? 'Слот в прошлом' : 'Слот занят'}
                           </span>
                         )}
                       </button>
@@ -445,33 +523,39 @@ const DatePickerPage = () => {
                       <button
                         key={slot.id}
                         className={`relative p-4 rounded-2xl shadow-xl transition-all duration-300 transform group ${
-                          slot.isAvailable
-                            ? selectedSlot?.id === slot.id
-                              ? 'bg-gradient-to-r from-green-600 to-green-700 text-white animate-pulse'
-                              : 'bg-white text-gray-800 hover:bg-green-50 hover:scale-105'
-                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          isSlotInPast(slot)
+                            ? 'bg-red-100 text-red-400 cursor-not-allowed'
+                            : slot.isAvailable
+                              ? selectedSlot?.id === slot.id
+                                ? 'bg-gradient-to-r from-green-600 to-green-700 text-white animate-pulse'
+                                : 'bg-white text-gray-800 hover:bg-green-50 hover:scale-105'
+                              : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                         }`}
                         onClick={() => handleSlotSelect(slot)}
-                        disabled={!slot.isAvailable || loading}
+                        disabled={!slot.isAvailable || isSlotInPast(slot) || loading}
                       >
                         <div className="flex items-center justify-between">
                           <div className="text-lg font-medium">{formatSlotTime(slot.slotTime)}</div>
-                          {slot.isAvailable ? (
+                          {slot.isAvailable && !isSlotInPast(slot) ? (
                             <svg
                               className="h-5 w-5 text-green-400"
                               fill="currentColor"
                               viewBox="0 0 20 20"
                               xmlns="http://www.w3.org/2000/svg"
                             >
-                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              <path
+                                fillRule="evenodd"
+                                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                clipRule="evenodd"
+                              />
                             </svg>
                           ) : (
                             <span className="text-gray-400 group-hover:tooltip">🔒</span>
                           )}
                         </div>
-                        {!slot.isAvailable && (
+                        {(!slot.isAvailable || isSlotInPast(slot)) && (
                           <span className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-                            Слот занят
+                            {isSlotInPast(slot) ? 'Слот в прошлом' : 'Слот занят'}
                           </span>
                         )}
                       </button>
@@ -484,7 +568,7 @@ const DatePickerPage = () => {
         </div>
       )}
 
-      {selectedTarget && selectedSlot && selectedDate && (
+      {selectedTarget && selectedDate && selectedSlot && (
         <div className="w-full max-w-lg mb-10 p-6 bg-white rounded-2xl shadow-xl animate-fade-in">
           <h3 className="text-xl font-semibold mb-4 text-gray-700">Ваш выбор</h3>
           <p className="text-gray-600">
@@ -502,18 +586,33 @@ const DatePickerPage = () => {
       <div className="relative group">
         <button
           className={`px-8 py-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl shadow-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-300 transform hover:scale-105 ${
-            !selectedTarget || !selectedSlot || !selectedDate || loading ? 'opacity-50 cursor-not-allowed' : ''
+            !selectedTarget || !selectedDate || !selectedSlot || loading ? 'opacity-50 cursor-not-allowed' : ''
           }`}
           onClick={handleSubmit}
-          disabled={!selectedTarget || !selectedSlot || !selectedDate || loading}
+          disabled={!selectedTarget || !selectedDate || !selectedSlot || loading}
         >
           Подтвердить запись
         </button>
-        {(!selectedTarget || !selectedSlot || !selectedDate) && (
+        {(!selectedTarget || !selectedDate || !selectedSlot) && (
           <span className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-            Выберите дату, услугу и время
+            Выберите услугу, дату и время
           </span>
         )}
+      </div>
+
+      <div className="flex flex-col space-y-2 mt-6">
+        <button
+          className="text-teal-600 hover:text-teal-800 text-sm font-medium bg-transparent border border-teal-600 hover:border-teal-800 rounded-md px-4 py-2 inline-block transition-colors duration-200"
+          onClick={() => navigate('/')}
+        >
+          Клиент
+        </button>
+        <button
+          className="text-teal-600 hover:text-teal-800 text-sm font-medium bg-transparent border border-teal-600 hover:border-teal-800 rounded-md px-4 py-2 inline-block transition-colors duration-200"
+          onClick={() => navigate('/dashboard')}
+        >
+          Табло очередей
+        </button>
       </div>
     </div>
   );
@@ -530,30 +629,53 @@ style.textContent = `
     animation: fadeIn 0.5s ease-out;
   }
   .custom-datepicker-popper {
-    z-index: 50;
-    width: fit-content;
-    margin-top: 8px;
+    z-index: 50 !important;
   }
   .react-datepicker {
-    border: 1px solid #e2e8f0;
-    border-radius: 0.5rem;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    font-family: inherit;
-  }
-  .react-datepicker__triangle {
-    display: none;
+    font-family: 'Inter', sans-serif;
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    background: #ffffff;
+    padding: 10px;
   }
   .react-datepicker__header {
-    background-color: #f8fafc;
-    border-bottom: 1px solid #e2e8f0;
+    background: linear-gradient(90deg, #3b82f6, #60a5fa);
+    border-bottom: none;
+    padding: 12px 0;
+    border-radius: 12px 12px 0 0;
+  }
+  .react-datepicker__current-month,
+  .react-datepicker__day-name {
+    color: #ffffff;
+    font-weight: 600;
   }
   .react-datepicker__day {
-    border-radius: 0.3rem;
+    color: #1f2937;
+    font-size: 14px;
+    padding: 8px;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+  }
+  .react-datepicker__day:hover {
+    background: #eff6ff;
+    color: #1f2937;
   }
   .react-datepicker__day--selected,
   .react-datepicker__day--keyboard-selected {
-    background-color: #2563eb;
-    color: white;
+    background: #3b82f6 !important;
+    color: #ffffff !important;
+    font-weight: 600;
+  }
+  .react-datepicker__day--disabled {
+    color: #d1d5db;
+    cursor: not-allowed;
+  }
+  .react-datepicker__navigation-icon::before {
+    border-color: #ffffff;
+  }
+  .react-datepicker__triangle {
+    display: none;
   }
 `;
 document.head.appendChild(style);

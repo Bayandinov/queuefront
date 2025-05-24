@@ -1,44 +1,32 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { useSelector } from 'react-redux';
 
 const QueueBoard = () => {
   const [calledQueue, setCalledQueue] = useState([]);
   const [pendingQueue, setPendingQueue] = useState([]);
   const [isLoading, setIsLoading] = useState({ called: false, pending: false });
   const [error, setError] = useState(null);
-  const { jwtToken } = useSelector((state) => state.auth.authData || {});
 
   // Централизованная функция для API-запросов
-  const apiRequest = useCallback(
-    async (method, url) => {
-      try {
-        const response = await axios({
-          method,
-          url: `http://localhost:8081${url}`,
-          headers: { Authorization: `Bearer ${jwtToken}` },
-        });
-        return response.data;
-      } catch (err) {
-        const message =
-          err.response?.status === 401
-            ? 'Ошибка аутентификации. Пожалуйста, войдите снова.'
-            : err.response?.data?.message ||
-              (err.code === 'ERR_NETWORK' ? 'Сервер недоступен. Проверьте подключение.' : 'Произошла ошибка.');
-        setError(message);
-        throw err;
-      }
-    },
-    [jwtToken]
-  );
+  const apiRequest = useCallback(async (method, url) => {
+    try {
+      const response = await axios({
+        method,
+        url: `http://localhost:8081${url}`,
+        headers: { 'Content-Type': 'application/json' },
+      });
+      return response.data;
+    } catch (err) {
+      const message =
+        err.response?.data?.message ||
+        (err.code === 'ERR_NETWORK' ? 'Сервер недоступен. Проверьте подключение.' : 'Произошла ошибка.');
+      setError(message);
+      throw err;
+    }
+  }, []);
 
   // Загрузка данных вызванной очереди
   const fetchCalledQueue = useCallback(async () => {
-    if (!jwtToken) {
-      setError('Токен отсутствует. Пожалуйста, войдите снова.');
-      return;
-    }
-
     setIsLoading((prev) => ({ ...prev, called: true }));
     setError(null);
     try {
@@ -47,15 +35,10 @@ const QueueBoard = () => {
     } finally {
       setIsLoading((prev) => ({ ...prev, called: false }));
     }
-  }, [apiRequest, jwtToken]);
+  }, [apiRequest]);
 
   // Загрузка данных ожидающей очереди
   const fetchPendingQueue = useCallback(async () => {
-    if (!jwtToken) {
-      setError('Токен отсутствует. Пожалуйста, войдите снова.');
-      return;
-    }
-
     setIsLoading((prev) => ({ ...prev, pending: true }));
     setError(null);
     try {
@@ -64,7 +47,7 @@ const QueueBoard = () => {
     } finally {
       setIsLoading((prev) => ({ ...prev, pending: false }));
     }
-  }, [apiRequest, jwtToken]);
+  }, [apiRequest]);
 
   // Загрузка данных при монтировании и каждые 10 секунд
   useEffect(() => {
@@ -122,7 +105,7 @@ const QueueBoard = () => {
               >
                 <div className="flex justify-between items-center">
                   <span className="text-xl sm:text-2xl font-bold text-blue-200">
-                    Талон №{item.queueNumber || '-'}
+                    Талон №{item.id || '-'}
                   </span>
                   <span className="text-xl sm:text-2xl font-bold text-blue-100">
                     Стол {item.table?.number || '-'}
@@ -155,7 +138,7 @@ const QueueBoard = () => {
                 className="bg-gray-700/90 backdrop-blur-sm p-6 rounded-xl shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 border-l-4 border-purple-500"
               >
                 <span className="text-xl sm:text-2xl font-bold text-purple-200">
-                  Талон №{item.queueNumber || '-'}
+                  Талон №{item.id || '-'}
                 </span>
               </div>
             ))}

@@ -29,30 +29,37 @@ const GuestServicePage = () => {
   const { selectedTable, availableTables, tableError } = useSelector((state) => state.table);
 
   // Централизованная обработка API-запросов
-  const apiRequest = useCallback(async (method, url, data) => {
-    try {
-      const response = await axios({
-        method,
-        url: `http://localhost:8081/api/v1/employee${url}`,
-        data,
-        headers: { Authorization: `Bearer ${jwtToken}` },
-      });
-      return response.data;
-    } catch (err) {
-      const message =
-        err.response?.status === 401
-          ? 'Ошибка аутентификации. Пожалуйста, войдите снова.'
-          : err.response?.data?.message || err.code === 'ERR_NETWORK'
-            ? 'Сервер недоступен. Проверьте подключение.'
-            : 'Произошла ошибка.';
-      setError(message);
-      if (err.response?.status === 401) {
-        dispatch(clearAuthData());
-        navigate('/employee-login');
+  const apiRequest = useCallback(
+    async (method, url, data) => {
+      try {
+        const response = await axios({
+          method,
+          url: `http://localhost:8081/api/v1/employee${url}`,
+          data,
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${jwtToken}`,
+          },
+        });
+        return response.data;
+      } catch (err) {
+        const message =
+          err.response?.status === 403
+            ? `Доступ запрещён для ${url}. Проверьте права доступа или токен.`
+            : err.response?.status === 401
+              ? 'Ошибка аутентификации. Пожалуйста, войдите снова.'
+              : err.response?.data?.message ||
+                (err.code === 'ERR_NETWORK' ? 'Сервер недоступен. Проверьте подключение.' : `Произошла ошибка при запросе к ${url}.`);
+        setError(message);
+        if (err.response?.status === 401) {
+          dispatch(clearAuthData());
+          navigate('/employee-login');
+        }
+        throw err;
       }
-      throw err;
-    }
-  }, [jwtToken, dispatch, navigate]);
+    },
+    [jwtToken, dispatch, navigate]
+  );
 
   // Перевод статуса
   const translateStatus = (status) => {
@@ -88,9 +95,20 @@ const GuestServicePage = () => {
     }
   };
 
+  // Форматирование времени слота
   const formatSlotTime = (slotTime) => {
     if (!slotTime || slotTime.hour == null || slotTime.minute == null) return 'Время не указано';
     return `${String(slotTime.hour).padStart(2, '0')}:${String(slotTime.minute).padStart(2, '0')}`;
+  };
+
+  // Форматирование даты
+  const formatDate = (date) => {
+    if (!date) return format(new Date(), 'dd.MM.yyyy', { locale: ru });
+    try {
+      return format(parseISO(date), 'dd.MM.yyyy', { locale: ru });
+    } catch {
+      return format(new Date(), 'dd.MM.yyyy', { locale: ru });
+    }
   };
 
   const formatDuration = (seconds) => {
@@ -116,16 +134,25 @@ const GuestServicePage = () => {
         apiRequest('get', '/queue/report'),
       ]);
 
-      setQueueData(Array.isArray(queueResponse) ? queueResponse : []);
+      const newQueueData = Array.isArray(queueResponse) ? queueResponse : [];
+      setQueueData(newQueueData);
       dispatch(setAvailableTables(Array.isArray(tablesResponse) ? tablesResponse : []));
       setReport(reportResponse || { averageWaitingTimeSeconds: 0, maxWaitingTimeSeconds: 0, minWaitingTimeSeconds: 0, completedClients: 0 });
 
       const userTable = tablesResponse.find((table) => table.user?.id === userId);
       if (userTable) dispatch(setSelectedTable(userTable));
+
+      // Синхронизация currentQueueId с вызванным клиентом
+      const calledClient = newQueueData.find((item) => item.status === 'CALLED');
+      if (calledClient && !currentQueueId) {
+        setCurrentQueueId(calledClient.id);
+      }
+    } catch (err) {
+      console.error('Ошибка при загрузке данных:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [jwtToken, userId, dispatch, navigate, apiRequest]);
+  }, [jwtToken, userId, dispatch, apiRequest, currentQueueId]);
 
   // Периодическое обновление
   useEffect(() => {
@@ -136,7 +163,9 @@ const GuestServicePage = () => {
       setTimeout(updateData, 30000);
     };
     updateData();
-    return () => { isMounted = false; };
+    return () => {
+      isMounted = false;
+    };
   }, [fetchData]);
 
   // Очистка ошибки через 5 секунд
@@ -171,6 +200,8 @@ const GuestServicePage = () => {
     try {
       const table = await apiRequest('post', '/tables', { tableId });
       dispatch(setSelectedTable(table));
+    } catch (err) {
+      console.error('Ошибка при выборе стола:', err);
     } finally {
       setActionLoading(false);
     }
@@ -189,22 +220,13 @@ const GuestServicePage = () => {
       return;
     }
 
-    // const pendingClients = queueData
-    //   .filter((item) => item.status === 'PENDING')
-    //   .sort((a, b) => (a.timeSlot?.slotTime ? new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime() : a.id - b.id));
-    // if (queueItem.id !== pendingClients[0]?.id) {
-    //   setCallWarning(
-    //     `Клиент с талоном №${queueItem.queueNumber} вызван не по порядку! Первый в очереди: №${pendingClients[0]?.queueNumber}`
-    //   );
-    // } else {
-    //   setCallWarning(null);
-    // }
-
     setActionLoading(true);
     try {
       await apiRequest('post', '/queue/call', { queueId, tableId: selectedTable.id });
-      setCurrentQueueId(queueItem.id);
+      setCurrentQueueId(queueItem.id); // Убедимся, что currentQueueId устанавливается
       await fetchData();
+    } catch (err) {
+      console.error('Ошибка при вызове клиента:', err);
     } finally {
       setActionLoading(false);
     }
@@ -223,10 +245,21 @@ const GuestServicePage = () => {
       return;
     }
 
+    if (!selectedTable?.id) {
+      setError('Выберите стол перед повторным вызовом клиента.');
+      return;
+    }
+
     setActionLoading(true);
     try {
-      await apiRequest('post', '/queue/call', { queueId: currentQueueId, tableId: selectedTable.id });
+      await apiRequest('post', '/queue/re-call', {
+        queueId: currentQueueId,
+        tableId: selectedTable.id,
+      });
       await fetchData();
+    } catch (err) {
+      console.error('Ошибка при повторном вызове клиента:', err);
+      setError('Не удалось выполнить повторный вызов.');
     } finally {
       setActionLoading(false);
     }
@@ -249,6 +282,8 @@ const GuestServicePage = () => {
     try {
       await apiRequest('post', '/queue/arrived', { queueId: currentQueueId });
       await fetchData();
+    } catch (err) {
+      console.error('Ошибка при отметке прибытия:', err);
     } finally {
       setActionLoading(false);
     }
@@ -272,6 +307,8 @@ const GuestServicePage = () => {
       await apiRequest('post', '/queue/no-show', { queueId: currentQueueId });
       setCurrentQueueId(null);
       await fetchData();
+    } catch (err) {
+      console.error('Ошибка при отметке "Не пришел":', err);
     } finally {
       setActionLoading(false);
     }
@@ -290,6 +327,8 @@ const GuestServicePage = () => {
       await apiRequest('post', '/queue/served', { queueId });
       if (queueItem.id === currentQueueId) setCurrentQueueId(null);
       await fetchData();
+    } catch (err) {
+      console.error('Ошибка при отметке "Обслужен":', err);
     } finally {
       setActionLoading(false);
     }
@@ -306,15 +345,25 @@ const GuestServicePage = () => {
   // Компонент таблицы
   const QueueTable = ({ title, clients, showActions, actionLabel, onAction, highlightQueueId }) => (
     <>
-      <h3 className={`text-lg font-semibold mb-2 ${title.includes('Ожидающие') ? 'text-blue-600' : title.includes('Вызванные') ? 'text-orange-600' : title.includes('Пришедшие') ? 'text-green-600' : 'text-purple-600'}`}>
+      <h3
+        className={`text-lg font-semibold mb-2 ${title.includes('Ожидающие')
+          ? 'text-blue-600'
+          : title.includes('Вызванные')
+          ? 'text-orange-600'
+          : title.includes('Пришедшие')
+          ? 'text-green-600'
+          : 'text-purple-600'
+        }`}
+      >
         {title}
       </h3>
       <table className="w-full text-left mb-6">
         <thead>
           <tr className="border-b">
             <th className="p-2 text-gray-600">№</th>
-            <th className="p-2 text-gray-600">Клиент</th>
+            <th className="p-2 text-gray-600">Email</th>
             <th className="p-2 text-gray-600">Время</th>
+            <th className="p-2 text-gray-600">Дата</th>
             <th className="p-2 text-gray-600">Цель</th>
             <th className="p-2 text-gray-600">Статус</th>
             {showActions && <th className="p-2 text-gray-600">Действие</th>}
@@ -324,33 +373,24 @@ const GuestServicePage = () => {
           {clients.map((item) => (
             <tr
               key={item.id}
-              className={`${item.id === highlightQueueId ? 'bg-gray-100' : 'hover:bg-gray-50'} ${item.status === 'CALLED' && item.id !== pendingClients[0]?.id ? 'border-l-4 border-red-500' : ''}`}
+              className={`${item.id === highlightQueueId ? 'bg-gray-100' : 'hover:bg-gray-50'} ${item.status === 'CALLED' && item.id !== pendingClients[0]?.id ? 'border-l-4 border-red-500' : ''
+              }`}
             >
               <td className="p-2">{item.id ?? '-'}</td>
-              <td className="p-2">
-                {item.client?.lastName && item.client?.firstName
-                  ? `${item.client.email}`
-                  : 'Клиент не указан'}
-                {/* {item.status === 'CALLED' && item.id !== pendingClients[0]?.id && (
-                  <span className="ml-2 text-red-600 flex items-center">
-                    <HiExclamationCircle className="w-4 h-4 mr-1" />
-                    Вызван не по порядку
-                  </span>
-                )} */}
-              </td>
-              <td className="p-2">{item.timeSlot?.slotTime ? formatSlotTime(item.timeSlot.slotTime) : 'Время не указано'}</td>
+              <td className="p-2">{item.client?.email ? `${item.client.email}` : 'Клиент не указан'}</td>
+              <td className="p-2">{item.timeSlot?.slotTime ? formatSlotTime(item.timeSlot.slotTime) : formatTime(item.createdAt)}</td>
+              <td className="p-2">{formatDate(item.timeSlot?.slotDate || item.createdAt)}</td>
               <td className="p-2">{item.target?.name ?? 'Цель не указана'}</td>
               <td className="p-2">
-                <span className={`px-2 py-1 rounded ${getStatusStyles(item.status)}`}>
-                  {translateStatus(item.status)}
-                </span>
+                <span className={`px-2 py-1 rounded ${getStatusStyles(item.status)}`}>{translateStatus(item.status)}</span>
               </td>
               {showActions && (
                 <td className="p-2">
                   <button
                     onClick={() => onAction(item.id)}
                     disabled={actionLoading}
-                    className={`py-1 px-3 rounded-lg transition ${actionLabel === 'Завершить обслуживание' ? 'bg-purple-500 text-white hover:bg-purple-600' : 'bg-orange-400 text-white hover:bg-orange-500'} ${actionLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    className={`py-1 px-3 rounded-lg transition ${actionLabel === 'Завершить обслуживание' ? 'bg-purple-500 text-white hover:bg-purple-600' : 'bg-orange-400 text-white hover:bg-orange-500'
+                    } ${actionLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     {actionLabel}
                   </button>
@@ -398,10 +438,7 @@ const GuestServicePage = () => {
                 ))}
             </select>
           )}
-          <button
-            onClick={handleLogout}
-            className="p-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
-          >
+          <button onClick={handleLogout} className="p-2 bg-red-500 text-white rounded-lg hover:bg-red-600">
             Выйти
           </button>
         </div>
@@ -426,7 +463,8 @@ const GuestServicePage = () => {
             <button
               onClick={() => handleCallClient(pendingClients[0]?.id)}
               disabled={actionLoading || pendingClients.length === 0 || !selectedTable?.id}
-              className={`mb-4 py-2 px-4 bg-orange-400 text-white font-semibold rounded-lg hover:bg-orange-500 transition ${actionLoading || pendingClients.length === 0 || !selectedTable?.id ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`mb-4 py-2 px-4 bg-orange-400 text-white font-semibold rounded-lg hover:bg-orange-500 transition ${actionLoading || pendingClients.length === 0 || !selectedTable?.id ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
             >
               Вызвать первого клиента
             </button>
@@ -508,8 +546,7 @@ const GuestServicePage = () => {
               })()}
             </p>
             <p className="text-gray-600">
-              Почта:{' '}
-              {queueData.find((item) => item.id === currentQueueId)?.client?.email ?? '-'}
+              Почта: {queueData.find((item) => item.id === currentQueueId)?.client?.email ?? '-'}
             </p>
             <p className="text-gray-600">
               Статус:{' '}
@@ -523,29 +560,30 @@ const GuestServicePage = () => {
               <button
                 onClick={handleRecallClient}
                 disabled={actionLoading || !currentQueueId || queueData.find((item) => item.id === currentQueueId)?.status !== 'CALLED'}
-                className={`w-full mt-4 py-2 bg-orange-400 text-white font-semibold rounded-lg hover:bg-orange-500 transition ${actionLoading || !currentQueueId || queueData.find((item) => item.id === currentQueueId)?.status !== 'CALLED' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`w-full mt-4 py-2 bg-orange-400 text-white font-semibold rounded-lg hover:bg-orange-500 transition ${actionLoading || !currentQueueId || queueData.find((item) => item.id === currentQueueId)?.status !== 'CALLED' ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
               >
                 Повторный вызов
               </button>
               <button
                 onClick={handleClientArrived}
                 disabled={actionLoading || !currentQueueId || queueData.find((item) => item.id === currentQueueId)?.status !== 'CALLED'}
-                className={`w-full mt-2 py-2 bg-green-500 text-white font-semibold rounded-lg hover:bg-green-600 transition ${actionLoading || !currentQueueId || queueData.find((item) => item.id === currentQueueId)?.status !== 'CALLED' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`w-full mt-2 py-2 bg-green-500 text-white font-semibold rounded-lg hover:bg-green-600 transition ${actionLoading || !currentQueueId || queueData.find((item) => item.id === currentQueueId)?.status !== 'CALLED' ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
               >
                 Пришел
               </button>
               <button
                 onClick={handleClientNoShow}
                 disabled={actionLoading || !currentQueueId || queueData.find((item) => item.id === currentQueueId)?.status !== 'CALLED'}
-                className={`w-full mt-2 py-2 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition ${actionLoading || !currentQueueId || queueData.find((item) => item.id === currentQueueId)?.status !== 'CALLED' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`w-full mt-2 py-2 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition ${actionLoading || !currentQueueId || queueData.find((item) => item.id === currentQueueId)?.status !== 'CALLED' ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
               >
                 Не пришел
               </button>
             </>
           )}
-          {status === 'Обед' && (
-            <p className="text-center text-gray-600 mt-4">Режим обеда, вызовы приостановлены</p>
-          )}
+          {status === 'Обед' && <p className="text-center text-gray-600 mt-4">Режим обеда, вызовы приостановлены</p>}
         </div>
       </div>
 
@@ -586,7 +624,8 @@ const GuestServicePage = () => {
             <div>
               <p className="text-gray-600">Явилось / Не явилось</p>
               <p className="text-2xl font-bold text-gray-800">
-                {queueData.filter((item) => item.status === 'ARRIVED' || item.status === 'SERVED').length} / {queueData.filter((item) => item.status === 'NO_SHOW').length}
+                {queueData.filter((item) => item.status === 'ARRIVED' || item.status === 'SERVED').length} /{' '}
+                {queueData.filter((item) => item.status === 'NO_SHOW').length}
               </p>
             </div>
           </div>
