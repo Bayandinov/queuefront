@@ -56,43 +56,38 @@ const DatePickerPage = () => {
   }, []);
 
   // Загрузка слотов при выборе услуги и даты
-  useEffect(() => {
-    if (!selectedTarget || !selectedDate) return;
+useEffect(() => {
+     if (!selectedTarget || !selectedDate) return;
 
-    const fetchSlots = async () => {
-      try {
-        setLoading(true);
-        // Форматируем дату в YYYY-MM-DD
-        const formattedDate = selectedDate.toISOString().split('T')[0];
-        const response = await axios.get('http://localhost:8081/api/v1/client/slots', {
-          params: {
-            targetId: selectedTarget.id,
-            slotDate: formattedDate,
-          },
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-        if (!response.headers['content-type']?.includes('application/json')) {
-          throw new Error('Ответ сервера не является JSON');
-        }
-        // Проверяем, находятся ли слоты в прошлом
-        const updatedSlots = response.data.map((slot) => {
-          const slotDateTime = new Date(`${slot.slotDate}T${convertSlotTimeToString(slot.slotTime)}`);
-          const isPast = slotDateTime < currentDateTime;
-          return { ...slot, isAvailable: slot.isAvailable && !isPast };
-        });
-        setSlots(updatedSlots);
-        setError(null);
-      } catch (err) {
-        console.error('Ошибка при загрузке слотов:', err);
-        setError(`Не удалось загрузить слоты: ${err.response ? `${err.response.status} ${err.response.statusText}` : err.message}`);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchSlots();
-  }, [selectedTarget, selectedDate]);
+     const fetchSlots = async () => {
+       try {
+         setLoading(true);
+         // Форматируем дату в YYYY-MM-DD в локальном часовом поясе (Астана)
+         const formattedDate = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+         console.log('Formatted date for request:', formattedDate); // Для отладки
+         const response = await axios.get('http://localhost:8081/api/v1/client/slots', {
+           params: {
+             targetId: selectedTarget.id,
+             slotDate: formattedDate,
+           },
+           headers: {
+             'Content-Type': 'application/json',
+           },
+         });
+         if (!response.headers['content-type']?.includes('application/json')) {
+           throw new Error('Ответ сервера не является JSON');
+         }
+         setSlots(response.data);
+         setError(null);
+       } catch (err) {
+         console.error('Ошибка при загрузке слотов:', err);
+         setError(`Не удалось загрузить слоты: ${err.response ? `${err.response.status} ${err.response.statusText}` : err.message}`);
+       } finally {
+         setLoading(false);
+       }
+     };
+     fetchSlots();
+   }, [selectedTarget, selectedDate]);
 
   // Обработчик выбора услуги
   const handleTargetSelect = (target) => {
@@ -148,7 +143,7 @@ const DatePickerPage = () => {
     throw new Error('Некорректный формат slotTime');
   };
 
-  // Проверка, находится ли слот в прошлом (по локальному времени)
+  // Функция проверки слота в прошлом (оставлена для возможного восстановления)
   const isSlotInPast = (slot) => {
     const slotDateTime = new Date(`${slot.slotDate}T${convertSlotTimeToString(slot.slotTime)}`);
     return slotDateTime < currentDateTime;
@@ -213,8 +208,8 @@ const DatePickerPage = () => {
 
       console.log('Response:', response.data);
 
-      // Сохраняем queueId из ответа (предполагаем, что он возвращается)
-      const newQueueId = response.data.queueId || 0; // Уточни, если структура ответа другая
+      // Сохраняем queueId из ответа
+      const newQueueId = response.data.queueId || 0;
       setQueueId(newQueueId);
 
       // Обновляем слоты после успешной записи
@@ -229,12 +224,7 @@ const DatePickerPage = () => {
       if (!slotsResponse.headers['content-type']?.includes('application/json')) {
         throw new Error('Ответ сервера не является JSON');
       }
-      const updatedSlots = slotsResponse.data.map((slot) => {
-        const slotDateTime = new Date(`${slot.slotDate}T${convertSlotTimeToString(slot.slotTime)}`);
-        const isPast = slotDateTime < currentDateTime;
-        return { ...slot, isAvailable: slot.isAvailable && !isPast };
-      });
-      setSlots(updatedSlots);
+      setSlots(slotsResponse.data); // Сохраняем слоты без изменений
       setSelectedSlot(null);
       setSuccessMessage('Запись успешно подтверждена!');
     } catch (err) {
@@ -271,7 +261,7 @@ const DatePickerPage = () => {
 
       const requestBody = {
         queueId: queueId,
-        tableId: 0, // Фиксированное значение, уточни, если tableId динамический
+        tableId: 0,
       };
 
       console.log('Recall Request Body:', JSON.stringify(requestBody, null, 2));
@@ -427,20 +417,18 @@ const DatePickerPage = () => {
                       <button
                         key={slot.id}
                         className={`relative p-4 rounded-2xl shadow-xl transition-all duration-300 transform group ${
-                          isSlotInPast(slot)
-                            ? 'bg-red-100 text-red-400 cursor-not-allowed'
-                            : slot.isAvailable
-                              ? selectedSlot?.id === slot.id
-                                ? 'bg-gradient-to-r from-green-600 to-green-700 text-white animate-pulse'
-                                : 'bg-white text-gray-800 hover:bg-green-50 hover:scale-105'
-                              : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          slot.isAvailable
+                            ? selectedSlot?.id === slot.id
+                              ? 'bg-gradient-to-r from-green-600 to-green-700 text-white animate-pulse'
+                              : 'bg-white text-gray-800 hover:bg-green-50 hover:scale-105'
+                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                         }`}
                         onClick={() => handleSlotSelect(slot)}
-                        disabled={!slot.isAvailable || isSlotInPast(slot) || loading}
+                        disabled={!slot.isAvailable || loading}
                       >
                         <div className="flex items-center justify-between">
                           <div className="text-lg font-medium">{formatSlotTime(slot.slotTime)}</div>
-                          {slot.isAvailable && !isSlotInPast(slot) ? (
+                          {slot.isAvailable ? (
                             <svg
                               className="h-5 w-5 text-green-400"
                               fill="currentColor"
@@ -457,9 +445,9 @@ const DatePickerPage = () => {
                             <span className="text-gray-400 group-hover:tooltip">🔒</span>
                           )}
                         </div>
-                        {(!slot.isAvailable || isSlotInPast(slot)) && (
+                        {!slot.isAvailable && (
                           <span className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-                            {isSlotInPast(slot) ? 'Слот в прошлом' : 'Слот занят'}
+                            Слот занят
                           </span>
                         )}
                       </button>
@@ -475,20 +463,18 @@ const DatePickerPage = () => {
                       <button
                         key={slot.id}
                         className={`relative p-4 rounded-2xl shadow-xl transition-all duration-300 transform group ${
-                          isSlotInPast(slot)
-                            ? 'bg-red-100 text-red-400 cursor-not-allowed'
-                            : slot.isAvailable
-                              ? selectedSlot?.id === slot.id
-                                ? 'bg-gradient-to-r from-green-600 to-green-700 text-white animate-pulse'
-                                : 'bg-white text-gray-800 hover:bg-green-50 hover:scale-105'
-                              : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          slot.isAvailable
+                            ? selectedSlot?.id === slot.id
+                              ? 'bg-gradient-to-r from-green-600 to-green-700 text-white animate-pulse'
+                              : 'bg-white text-gray-800 hover:bg-green-50 hover:scale-105'
+                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                         }`}
                         onClick={() => handleSlotSelect(slot)}
-                        disabled={!slot.isAvailable || isSlotInPast(slot) || loading}
+                        disabled={!slot.isAvailable || loading}
                       >
                         <div className="flex items-center justify-between">
                           <div className="text-lg font-medium">{formatSlotTime(slot.slotTime)}</div>
-                          {slot.isAvailable && !isSlotInPast(slot) ? (
+                          {slot.isAvailable ? (
                             <svg
                               className="h-5 w-5 text-green-400"
                               fill="currentColor"
@@ -505,9 +491,9 @@ const DatePickerPage = () => {
                             <span className="text-gray-400 group-hover:tooltip">🔒</span>
                           )}
                         </div>
-                        {(!slot.isAvailable || isSlotInPast(slot)) && (
+                        {!slot.isAvailable && (
                           <span className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-                            {isSlotInPast(slot) ? 'Слот в прошлом' : 'Слот занят'}
+                            Слот занят
                           </span>
                         )}
                       </button>
@@ -523,20 +509,18 @@ const DatePickerPage = () => {
                       <button
                         key={slot.id}
                         className={`relative p-4 rounded-2xl shadow-xl transition-all duration-300 transform group ${
-                          isSlotInPast(slot)
-                            ? 'bg-red-100 text-red-400 cursor-not-allowed'
-                            : slot.isAvailable
-                              ? selectedSlot?.id === slot.id
-                                ? 'bg-gradient-to-r from-green-600 to-green-700 text-white animate-pulse'
-                                : 'bg-white text-gray-800 hover:bg-green-50 hover:scale-105'
-                              : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          slot.isAvailable
+                            ? selectedSlot?.id === slot.id
+                              ? 'bg-gradient-to-r from-green-600 to-green-700 text-white animate-pulse'
+                              : 'bg-white text-gray-800 hover:bg-green-50 hover:scale-105'
+                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                         }`}
                         onClick={() => handleSlotSelect(slot)}
-                        disabled={!slot.isAvailable || isSlotInPast(slot) || loading}
+                        disabled={!slot.isAvailable || loading}
                       >
                         <div className="flex items-center justify-between">
                           <div className="text-lg font-medium">{formatSlotTime(slot.slotTime)}</div>
-                          {slot.isAvailable && !isSlotInPast(slot) ? (
+                          {slot.isAvailable ? (
                             <svg
                               className="h-5 w-5 text-green-400"
                               fill="currentColor"
@@ -553,9 +537,9 @@ const DatePickerPage = () => {
                             <span className="text-gray-400 group-hover:tooltip">🔒</span>
                           )}
                         </div>
-                        {(!slot.isAvailable || isSlotInPast(slot)) && (
+                        {!slot.isAvailable && (
                           <span className="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 -top-8 left-1/2 transform -translate-x-1/2">
-                            {isSlotInPast(slot) ? 'Слот в прошлом' : 'Слот занят'}
+                            Слот занят
                           </span>
                         )}
                       </button>

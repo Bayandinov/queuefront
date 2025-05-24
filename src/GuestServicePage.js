@@ -32,6 +32,7 @@ const GuestServicePage = () => {
   const apiRequest = useCallback(
     async (method, url, data) => {
       try {
+        console.log(`Sending ${method} request to ${url}:`, data);
         const response = await axios({
           method,
           url: `http://localhost:8081/api/v1/employee${url}`,
@@ -41,6 +42,7 @@ const GuestServicePage = () => {
             Authorization: `Bearer ${jwtToken}`,
           },
         });
+        console.log(`Response from ${url}:`, response.data);
         return response.data;
       } catch (err) {
         const message =
@@ -69,6 +71,7 @@ const GuestServicePage = () => {
       ARRIVED: 'Пришел',
       NO_SHOW: 'Не пришел',
       SERVED: 'Обслужен',
+      RE_CALLED: 'Повторно вызван',
     };
     return statuses[status] || '-';
   };
@@ -81,6 +84,7 @@ const GuestServicePage = () => {
       ARRIVED: 'bg-green-100 text-green-800',
       NO_SHOW: 'bg-red-100 text-red-800',
       SERVED: 'bg-purple-100 text-purple-800',
+      RE_CALLED: 'bg-yellow-100 text-yellow-800',
     };
     return styles[status] || 'bg-gray-100 text-gray-800';
   };
@@ -118,6 +122,12 @@ const GuestServicePage = () => {
     return `${minutes} мин ${remainingSeconds} сек`;
   };
 
+  // Проверка совпадения стола
+  const canServiceClient = (queueItem) => {
+    if (!selectedTable?.number || !queueItem?.table?.number) return false;
+    return selectedTable.number === queueItem.table.number;
+  };
+
   // Загрузка данных
   const fetchData = useCallback(async () => {
     if (!jwtToken || !userId) {
@@ -143,12 +153,15 @@ const GuestServicePage = () => {
       if (userTable) dispatch(setSelectedTable(userTable));
 
       // Синхронизация currentQueueId с вызванным клиентом
-      const calledClient = newQueueData.find((item) => item.status === 'CALLED');
-      if (calledClient && !currentQueueId) {
+      const calledClient = newQueueData.find((item) => item.status === 'CALLED' || item.status === 'RE_CALLED');
+      if (calledClient) {
         setCurrentQueueId(calledClient.id);
+      } else if (currentQueueId && !newQueueData.find((item) => item.id === currentQueueId && (item.status === 'CALLED' || item.status === 'RE_CALLED'))) {
+        setCurrentQueueId(null);
       }
     } catch (err) {
       console.error('Ошибка при загрузке данных:', err);
+      setError('Не удалось загрузить данные.');
     } finally {
       setIsLoading(false);
     }
@@ -181,8 +194,8 @@ const GuestServicePage = () => {
     if (selectedTable?.id) {
       try {
         await apiRequest('post', '/tables/release', { tableId: selectedTable.id });
-      } catch {
-        // Ошибка уже обработана в apiRequest
+      } catch (err) {
+        console.error('Ошибка при освобождении стола:', err);
       }
     }
     dispatch(clearAuthData());
@@ -202,6 +215,7 @@ const GuestServicePage = () => {
       dispatch(setSelectedTable(table));
     } catch (err) {
       console.error('Ошибка при выборе стола:', err);
+      setError('Не удалось выбрать стол.');
     } finally {
       setActionLoading(false);
     }
@@ -220,13 +234,21 @@ const GuestServicePage = () => {
       return;
     }
 
+    if (queueItem.status !== 'PENDING') {
+      setError('Клиент не находится в статусе "Ожидает".');
+      return;
+    }
+
     setActionLoading(true);
     try {
-      await apiRequest('post', '/queue/call', { queueId, tableId: selectedTable.id });
-      setCurrentQueueId(queueItem.id); // Убедимся, что currentQueueId устанавливается
+      console.log('Calling client with:', { queueId, tableId: selectedTable.id });
+      const response = await apiRequest('post', '/queue/call', { queueId, tableId: selectedTable.id });
+      console.log('Call response:', response);
+      setCurrentQueueId(queueId);
       await fetchData();
     } catch (err) {
       console.error('Ошибка при вызове клиента:', err);
+      setError('Не удалось вызвать клиента: ' + (err.response?.data?.message || err.message));
     } finally {
       setActionLoading(false);
     }
@@ -240,7 +262,17 @@ const GuestServicePage = () => {
     }
 
     const queueItem = queueData.find((item) => item.id === currentQueueId);
-    if (!queueItem || queueItem.status !== 'CALLED') {
+    if (!queueItem) {
+      setError('Клиент не найден.');
+      return;
+    }
+
+    if (!canServiceClient(queueItem)) {
+      setError('Вы не можете обслуживать клиента за другим столом.');
+      return;
+    }
+
+    if (queueItem.status !== 'CALLED') {
       setError('Клиент не находится в статусе "Вызван".');
       return;
     }
@@ -252,14 +284,16 @@ const GuestServicePage = () => {
 
     setActionLoading(true);
     try {
-      await apiRequest('post', '/queue/re-call', {
+      console.log('Recalling client with:', { queueId: currentQueueId, tableId: selectedTable.id });
+      const response = await apiRequest('post', '/queue/re-call', {
         queueId: currentQueueId,
         tableId: selectedTable.id,
       });
+      console.log('Re-call response:', response);
       await fetchData();
     } catch (err) {
       console.error('Ошибка при повторном вызове клиента:', err);
-      setError('Не удалось выполнить повторный вызов.');
+      setError('Не удалось выполнить повторный вызов: ' + (err.response?.data?.message || err.message));
     } finally {
       setActionLoading(false);
     }
@@ -273,8 +307,18 @@ const GuestServicePage = () => {
     }
 
     const queueItem = queueData.find((item) => item.id === currentQueueId);
-    if (!queueItem || queueItem.status !== 'CALLED') {
-      setError('Клиент не находится в статусе "Вызван".');
+    if (!queueItem) {
+      setError('Клиент не найден.');
+      return;
+    }
+
+    if (!canServiceClient(queueItem)) {
+      setError('Вы не можете обслуживать клиента за другим столом.');
+      return;
+    }
+
+    if (queueItem.status !== 'CALLED' && queueItem.status !== 'RE_CALLED') {
+      setError('Клиент не находится в статусе "Вызван" или "Повторно вызван".');
       return;
     }
 
@@ -284,6 +328,7 @@ const GuestServicePage = () => {
       await fetchData();
     } catch (err) {
       console.error('Ошибка при отметке прибытия:', err);
+      setError('Не удалось отметить прибытие.');
     } finally {
       setActionLoading(false);
     }
@@ -297,8 +342,18 @@ const GuestServicePage = () => {
     }
 
     const queueItem = queueData.find((item) => item.id === currentQueueId);
-    if (!queueItem || queueItem.status !== 'CALLED') {
-      setError('Клиент не находится в статусе "Вызван".');
+    if (!queueItem) {
+      setError('Клиент не найден.');
+      return;
+    }
+
+    if (!canServiceClient(queueItem)) {
+      setError('Вы не можете обслуживать клиента за другим столом.');
+      return;
+    }
+
+    if (queueItem.status !== 'CALLED' && queueItem.status !== 'RE_CALLED') {
+      setError('Клиент не находится в статусе "Вызван" или "Повторно вызван".');
       return;
     }
 
@@ -309,6 +364,7 @@ const GuestServicePage = () => {
       await fetchData();
     } catch (err) {
       console.error('Ошибка при отметке "Не пришел":', err);
+      setError('Не удалось отметить "Не пришел".');
     } finally {
       setActionLoading(false);
     }
@@ -322,6 +378,11 @@ const GuestServicePage = () => {
       return;
     }
 
+    if (!canServiceClient(queueItem)) {
+      setError('Вы не можете обслуживать клиента за другим столом.');
+      return;
+    }
+
     setActionLoading(true);
     try {
       await apiRequest('post', '/queue/served', { queueId });
@@ -329,6 +390,7 @@ const GuestServicePage = () => {
       await fetchData();
     } catch (err) {
       console.error('Ошибка при отметке "Обслужен":', err);
+      setError('Не удалось отметить "Обслужен".');
     } finally {
       setActionLoading(false);
     }
@@ -338,7 +400,7 @@ const GuestServicePage = () => {
   const pendingClients = queueData
     .filter((item) => item.status === 'PENDING')
     .sort((a, b) => (a.timeSlot?.slotTime ? new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime() : a.id - b.id));
-  const calledClients = queueData.filter((item) => item.status === 'CALLED');
+  const calledClients = queueData.filter((item) => item.status === 'CALLED' || item.status === 'RE_CALLED');
   const arrivedClients = queueData.filter((item) => item.status === 'ARRIVED');
   const completedClients = queueData.filter((item) => item.status === 'SERVED' || item.status === 'NO_SHOW');
 
@@ -348,7 +410,7 @@ const GuestServicePage = () => {
       <h3
         className={`text-lg font-semibold mb-2 ${title.includes('Ожидающие')
           ? 'text-blue-600'
-          : title.includes('Вызванные')
+          : title.includes('Выズванные')
           ? 'text-orange-600'
           : title.includes('Пришедшие')
           ? 'text-green-600'
@@ -367,37 +429,40 @@ const GuestServicePage = () => {
             <th className="p-2 text-gray-600">Цель</th>
             <th className="p-2 text-gray-600">Статус</th>
             {showActions && <th className="p-2 text-gray-600">Действие</th>}
+            <th className="p-2 text-gray-600">Стол №</th>
           </tr>
         </thead>
         <tbody>
-          {clients.map((item) => (
-            <tr
-              key={item.id}
-              className={`${item.id === highlightQueueId ? 'bg-gray-100' : 'hover:bg-gray-50'} ${item.status === 'CALLED' && item.id !== pendingClients[0]?.id ? 'border-l-4 border-red-500' : ''
-              }`}
-            >
-              <td className="p-2">{item.id ?? '-'}</td>
-              <td className="p-2">{item.client?.email ? `${item.client.email}` : 'Клиент не указан'}</td>
-              <td className="p-2">{item.timeSlot?.slotTime ? formatSlotTime(item.timeSlot.slotTime) : formatTime(item.createdAt)}</td>
-              <td className="p-2">{formatDate(item.timeSlot?.slotDate || item.createdAt)}</td>
-              <td className="p-2">{item.target?.name ?? 'Цель не указана'}</td>
-              <td className="p-2">
-                <span className={`px-2 py-1 rounded ${getStatusStyles(item.status)}`}>{translateStatus(item.status)}</span>
-              </td>
-              {showActions && (
+          {clients.map((item) => {
+            const canAct = !showActions || item.status === 'PENDING' || canServiceClient(item);
+            return (
+              <tr
+                key={item.id}
+                className={`${item.id === highlightQueueId ? 'bg-gray-100' : 'hover:bg-gray-50'} ${item.status === 'CALLED' || item.status === 'RE_CALLED' ? 'border-l-4 border-red-500' : ''}`}
+              >
+                <td className="p-2">{item.id ?? '-'}</td>
+                <td className="p-2">{item.client?.email ? `${item.client.email}` : 'Клиент не указан'}</td>
+                <td className="p-2">{item.timeSlot?.slotTime ? formatSlotTime(item.timeSlot.slotTime) : formatTime(item.createdAt)}</td>
+                <td className="p-2">{formatDate(item.timeSlot?.slotDate || item.createdAt)}</td>
+                <td className="p-2">{item.target?.name ?? 'Цель не указана'}</td>
                 <td className="p-2">
-                  <button
-                    onClick={() => onAction(item.id)}
-                    disabled={actionLoading}
-                    className={`py-1 px-3 rounded-lg transition ${actionLabel === 'Завершить обслуживание' ? 'bg-purple-500 text-white hover:bg-purple-600' : 'bg-orange-400 text-white hover:bg-orange-500'
-                    } ${actionLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    {actionLabel}
-                  </button>
+                  <span className={`px-2 py-1 rounded ${getStatusStyles(item.status)}`}>{translateStatus(item.status)}</span>
                 </td>
-              )}
-            </tr>
-          ))}
+                {showActions && (
+                  <td className="p-2">
+                    <button
+                      onClick={() => onAction(item.id)}
+                      disabled={actionLoading || !canAct}
+                      className={`py-1 px-3 rounded-lg transition ${actionLabel === 'Завершить обслуживание' ? 'bg-purple-500 text-white hover:bg-purple-600' : 'bg-orange-400 text-white hover:bg-orange-500'} ${actionLoading || !canAct ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      {actionLabel}
+                    </button>
+                  </td>
+                )}
+                <td className="p-2">{item.table?.number ?? 'Стол не указан'}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </>
@@ -420,7 +485,7 @@ const GuestServicePage = () => {
             <option value="Обед">Обед</option>
           </select>
           {selectedTable ? (
-            <span className="p-2 text-gray-800 font-semibold">Стол №{selectedTable.number}</span>
+            <span className="p-2 text-gray-800 font-semibold">Стол №{selectedTable?.number ?? '-'}</span>
           ) : (
             <select
               value={selectedTable?.id || ''}
@@ -433,7 +498,7 @@ const GuestServicePage = () => {
                 .filter((table) => table.status === 'FREE')
                 .map((table) => (
                   <option key={table.id} value={table.id}>
-                    Стол №{table.number}
+                    Стол №{table.number ?? '-'}
                   </option>
                 ))}
             </select>
@@ -446,7 +511,12 @@ const GuestServicePage = () => {
 
       <div className="flex space-x-4">
         <div className="flex-1 bg-white p-6 rounded-lg shadow-lg">
-          {tableError && <p className="text-red-600 mb-4">{tableError}</p>}
+          {tableError && (
+            <p className="text-red-600 mb-4 flex items-center">
+              <HiExclamationCircle className="w-5 h-5 mr-2" />
+              {tableError}
+            </p>
+          )}
           {error && (
             <p className="text-red-600 mb-4 flex items-center">
               <HiExclamationCircle className="w-5 h-5 mr-2" />
@@ -463,8 +533,7 @@ const GuestServicePage = () => {
             <button
               onClick={() => handleCallClient(pendingClients[0]?.id)}
               disabled={actionLoading || pendingClients.length === 0 || !selectedTable?.id}
-              className={`mb-4 py-2 px-4 bg-orange-400 text-white font-semibold rounded-lg hover:bg-orange-500 transition ${actionLoading || pendingClients.length === 0 || !selectedTable?.id ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
+              className={`mb-4 py-2 px-4 bg-orange-400 text-white font-semibold rounded-lg hover:bg-orange-500 transition ${actionLoading || pendingClients.length === 0 || !selectedTable?.id ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               Вызвать первого клиента
             </button>
@@ -537,13 +606,12 @@ const GuestServicePage = () => {
               </span>
             </p>
             <p className="text-gray-600">
-              Имя:{' '}
-              {(() => {
-                const selectedClient = queueData.find((item) => item.id === currentQueueId);
-                return selectedClient?.client
-                  ? `${selectedClient.client.lastName} ${selectedClient.client.firstName} ${selectedClient.client.middleName || ''}`
-                  : '-';
-              })()}
+              Время повторного вызова:{' '}
+              <span className="font-semibold">
+                {queueData.find((item) => item.id === currentQueueId)?.reCalledAt
+                  ? formatTime(queueData.find((item) => item.id === currentQueueId)?.reCalledAt)
+                  : '00:00:00'}
+              </span>
             </p>
             <p className="text-gray-600">
               Почта: {queueData.find((item) => item.id === currentQueueId)?.client?.email ?? '-'}
@@ -555,32 +623,35 @@ const GuestServicePage = () => {
               </span>
             </p>
           </div>
-          {status === 'Обслуживание' && (
+          {status === 'Обслуживание' && currentQueueId && (
             <>
-              <button
-                onClick={handleRecallClient}
-                disabled={actionLoading || !currentQueueId || queueData.find((item) => item.id === currentQueueId)?.status !== 'CALLED'}
-                className={`w-full mt-4 py-2 bg-orange-400 text-white font-semibold rounded-lg hover:bg-orange-500 transition ${actionLoading || !currentQueueId || queueData.find((item) => item.id === currentQueueId)?.status !== 'CALLED' ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
-              >
-                Повторный вызов
-              </button>
-              <button
-                onClick={handleClientArrived}
-                disabled={actionLoading || !currentQueueId || queueData.find((item) => item.id === currentQueueId)?.status !== 'CALLED'}
-                className={`w-full mt-2 py-2 bg-green-500 text-white font-semibold rounded-lg hover:bg-green-600 transition ${actionLoading || !currentQueueId || queueData.find((item) => item.id === currentQueueId)?.status !== 'CALLED' ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
-              >
-                Пришел
-              </button>
-              <button
-                onClick={handleClientNoShow}
-                disabled={actionLoading || !currentQueueId || queueData.find((item) => item.id === currentQueueId)?.status !== 'CALLED'}
-                className={`w-full mt-2 py-2 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition ${actionLoading || !currentQueueId || queueData.find((item) => item.id === currentQueueId)?.status !== 'CALLED' ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
-              >
-                Не пришел
-              </button>
+              {queueData.find((item) => item.id === currentQueueId)?.status === 'CALLED' && (
+                <button
+                  onClick={handleRecallClient}
+                  disabled={actionLoading || !canServiceClient(queueData.find((item) => item.id === currentQueueId))}
+                  className={`w-full mt-4 py-2 bg-orange-400 text-white font-semibold rounded-lg hover:bg-orange-500 transition ${actionLoading || !canServiceClient(queueData.find((item) => item.id === currentQueueId)) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  Повторный вызов
+                </button>
+              )}
+              {(queueData.find((item) => item.id === currentQueueId)?.status === 'CALLED' || queueData.find((item) => item.id === currentQueueId)?.status === 'RE_CALLED') && (
+                <>
+                  <button
+                    onClick={handleClientArrived}
+                    disabled={actionLoading || !canServiceClient(queueData.find((item) => item.id === currentQueueId))}
+                    className={`w-full mt-2 py-2 bg-green-500 text-white font-semibold rounded-lg hover:bg-green-600 transition ${actionLoading || !canServiceClient(queueData.find((item) => item.id === currentQueueId)) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    Пришел
+                  </button>
+                  <button
+                    onClick={handleClientNoShow}
+                    disabled={actionLoading || !canServiceClient(queueData.find((item) => item.id === currentQueueId))}
+                    className={`w-full mt-2 py-2 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition ${actionLoading || !canServiceClient(queueData.find((item) => item.id === currentQueueId)) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    Не пришел
+                  </button>
+                </>
+              )}
             </>
           )}
           {status === 'Обед' && <p className="text-center text-gray-600 mt-4">Режим обеда, вызовы приостановлены</p>}
