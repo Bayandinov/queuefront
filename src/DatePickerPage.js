@@ -18,7 +18,6 @@ const DatePickerPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
-  const [queueId, setQueueId] = useState(null); // Храним queueId после записи
   const navigate = useNavigate();
 
   // Извлекаем client из Redux слайса
@@ -56,45 +55,45 @@ const DatePickerPage = () => {
   }, []);
 
   // Загрузка слотов при выборе услуги и даты
-useEffect(() => {
-     if (!selectedTarget || !selectedDate) return;
+  useEffect(() => {
+    if (!selectedTarget || !selectedDate) return;
 
-     const fetchSlots = async () => {
-       try {
-         setLoading(true);
-         // Форматируем дату в YYYY-MM-DD в локальном часовом поясе (Астана)
-         const formattedDate = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
-         console.log('Formatted date for request:', formattedDate); // Для отладки
-         const response = await axios.get('http://localhost:8081/api/v1/client/slots', {
-           params: {
-             targetId: selectedTarget.id,
-             slotDate: formattedDate,
-           },
-           headers: {
-             'Content-Type': 'application/json',
-           },
-         });
-         if (!response.headers['content-type']?.includes('application/json')) {
-           throw new Error('Ответ сервера не является JSON');
-         }
-         setSlots(response.data);
-         setError(null);
-       } catch (err) {
-         console.error('Ошибка при загрузке слотов:', err);
-         setError(`Не удалось загрузить слоты: ${err.response ? `${err.response.status} ${err.response.statusText}` : err.message}`);
-       } finally {
-         setLoading(false);
-       }
-     };
-     fetchSlots();
-   }, [selectedTarget, selectedDate]);
+    const fetchSlots = async () => {
+      try {
+        setLoading(true);
+        const formattedDate = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+        console.log('Formatted date for request:', formattedDate);
+        const response = await axios.get('http://localhost:8081/api/v1/client/slots', {
+          params: {
+            targetId: selectedTarget.id,
+            slotDate: formattedDate,
+          },
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        console.log('Fetch Slots Response Data:', response.data);
+        if (!response.headers['content-type']?.includes('application/json')) {
+          throw new Error('Ответ сервера не является JSON');
+        }
+        const slotsData = Array.isArray(response.data) ? response.data : [];
+        setSlots(slotsData);
+        setError(null);
+      } catch (err) {
+        console.error('Ошибка при загрузке слотов:', err);
+        setError(`Не удалось загрузить слоты: ${err.response ? `${err.response.status} ${err.response.statusText}` : err.message}`);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchSlots();
+  }, [selectedTarget, selectedDate]);
 
   // Обработчик выбора услуги
   const handleTargetSelect = (target) => {
     setSelectedTarget(target);
     setSelectedSlot(null);
     setSuccessMessage(null);
-    setQueueId(null);
   };
 
   // Обработчик выбора даты
@@ -102,7 +101,6 @@ useEffect(() => {
     setSelectedDate(date);
     setSelectedSlot(null);
     setSuccessMessage(null);
-    setQueueId(null);
   };
 
   // Обработчик выбора слота
@@ -110,7 +108,6 @@ useEffect(() => {
     if (slot.isAvailable) {
       setSelectedSlot(slot);
       setSuccessMessage(null);
-      setQueueId(null);
     }
   };
 
@@ -154,6 +151,11 @@ useEffect(() => {
     const morning = [];
     const afternoon = [];
     const evening = [];
+
+    if (!Array.isArray(slots)) {
+      console.warn('groupSlotsByTime: slots is not an array:', slots);
+      return { morning, afternoon, evening };
+    }
 
     slots.forEach((slot) => {
       const hour = typeof slot.slotTime === 'string'
@@ -206,13 +208,8 @@ useEffect(() => {
         },
       });
 
-      console.log('Response:', response.data);
+      console.log('Queue Select Response:', response.data);
 
-      // Сохраняем queueId из ответа
-      const newQueueId = response.data.queueId || 0;
-      setQueueId(newQueueId);
-
-      // Обновляем слоты после успешной записи
       const formattedDate = selectedDate.toISOString().split('T')[0];
       const slotsResponse = await axios.get('http://localhost:8081/api/v1/client/slots', {
         params: { targetId: selectedTarget.id, slotDate: formattedDate },
@@ -221,10 +218,41 @@ useEffect(() => {
         },
       });
 
-      if (!slotsResponse.headers['content-type']?.includes('application/json')) {
-        throw new Error('Ответ сервера не является JSON');
+      console.log('Slots Response Content-Type:', slotsResponse.headers['content-type']);
+      console.log('Slots Response Data:', slotsResponse.data);
+      if (!slotsResponse.headers['content-type']?.toLowerCase().includes('application/json')) {
+        console.warn('Slots Content-Type is not application/json:', slotsResponse.headers['content-type']);
+        try {
+          JSON.parse(JSON.stringify(slotsResponse.data));
+          const slotsData = Array.isArray(slotsResponse.data) ? slotsResponse.data : [];
+          setSlots(slotsData);
+        } catch (parseError) {
+          throw new Error('Ответ сервера для слотов не является JSON');
+        }
+      } else {
+        const slotsData = Array.isArray(slotsResponse.data) ? slotsResponse.data : [];
+        setSlots(slotsData);
       }
-      setSlots(slotsResponse.data); // Сохраняем слоты без изменений
+
+      const targetsResponse = await axios.get('http://localhost:8081/api/v1/client/targets', {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      console.log('Targets Response Content-Type:', targetsResponse.headers['content-type']);
+      if (!targetsResponse.headers['content-type']?.toLowerCase().includes('application/json')) {
+        console.warn('Targets Content-Type is not application/json:', targetsResponse.headers['content-type']);
+        try {
+          JSON.parse(JSON.stringify(targetsResponse.data));
+          setTargets(targetsResponse.data);
+        } catch (parseError) {
+          throw new Error('Ответ сервера для таргетов не является JSON');
+        }
+      } else {
+        setTargets(targetsResponse.data);
+      }
+
       setSelectedSlot(null);
       setSuccessMessage('Запись успешно подтверждена!');
     } catch (err) {
@@ -236,53 +264,6 @@ useEffect(() => {
           errorMessage = 'Доступ запрещён: проверьте ID клиента или доступ к слоту';
         } else if (err.response.status === 400) {
           errorMessage = `Некорректный запрос: ${err.response.data || 'проверьте данные'}`;
-        } else {
-          errorMessage = `${err.response.status} ${err.response.statusText}: ${err.response.data || ''}`;
-        }
-      } else {
-        errorMessage = err.message;
-      }
-      setError(errorMessage);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Обработчик повторного вызова
-  const handleRecall = async () => {
-    if (!queueId) {
-      alert('Ошибка: ID очереди не определён. Сначала подтвердите запись.');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const requestBody = {
-        queueId: queueId,
-        tableId: 0,
-      };
-
-      console.log('Recall Request Body:', JSON.stringify(requestBody, null, 2));
-
-      const response = await axios.post('http://localhost:8081/api/v1/employee/queue/re-call', requestBody, {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      console.log('Recall Response:', response.data);
-      setSuccessMessage('Клиент успешно вызван повторно!');
-    } catch (err) {
-      console.error('Ошибка при повторном вызове:', err);
-      console.log('Recall Error Response:', err.response?.data);
-      let errorMessage = 'Не удалось выполнить повторный вызов';
-      if (err.response) {
-        if (err.response.status === 403) {
-          errorMessage = 'Доступ запрещён: проверьте права сотрудника';
-        } else if (err.response.status === 400) {
-          errorMessage = `Некорректный запрос: ${err.response.data || 'проверьте queueId и tableId'}`;
         } else {
           errorMessage = `${err.response.status} ${err.response.statusText}: ${err.response.data || ''}`;
         }
@@ -315,17 +296,6 @@ useEffect(() => {
       {successMessage && (
         <div className="w-full max-w-lg mb-8 p-6 bg-green-100 text-green-800 rounded-2xl shadow-xl animate-fade-in">
           <h3 className="text-xl font-semibold">{successMessage}</h3>
-          {queueId && (
-            <button
-              className={`mt-4 px-6 py-2 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-xl shadow-md hover:from-teal-600 hover:to-teal-700 transition-all duration-300 transform hover:scale-105 ${
-                loading ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-              onClick={handleRecall}
-              disabled={loading}
-            >
-              Повторный вызов
-            </button>
-          )}
         </div>
       )}
 
@@ -387,8 +357,8 @@ useEffect(() => {
           <DatePicker
             selected={selectedDate}
             onChange={handleDateSelect}
-            minDate={currentDateTime} // Ограничение: только текущая дата и будущие
-            maxDate={maxDate} // Ограничение: не дальше одного месяца вперёд
+            minDate={currentDateTime}
+            maxDate={maxDate}
             dateFormat="dd.MM.yyyy"
             locale="ru"
             className="p-3 border border-gray-200 rounded-xl w-full bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 text-gray-800 placeholder-gray-400"
